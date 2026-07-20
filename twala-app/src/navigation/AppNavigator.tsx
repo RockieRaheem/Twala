@@ -5,6 +5,7 @@ import HomeDashboard from '../screens/HomeDashboard';
 import AIAssistant from '../screens/AIAssistant';
 import SmartTransfer from '../screens/SmartTransfer';
 import GoalDetail from '../screens/GoalDetail';
+import History from '../screens/History';
 import BottomNavBar, { AppScreen } from '../components/BottomNavBar';
 import { Colors } from '../theme';
 
@@ -43,11 +44,7 @@ export default function AppNavigator() {
       case 'GoalDetail':
         return <GoalDetail onBack={handleBack} />;
       case 'History':
-        return (
-          <View style={styles.placeholder}>
-            <BottomNavBar activeRoute={currentScreen} onNavigate={navigate} />
-          </View>
-        );
+        return <History />;
       default:
         return <HomeDashboard onNavigate={navigate} />;
     }
@@ -74,10 +71,5 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-  },
-  placeholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
 });
