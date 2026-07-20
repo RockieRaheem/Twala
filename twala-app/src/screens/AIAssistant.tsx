@@ -1,16 +1,8 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Image, Animated, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Image, Animated, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 import { chatApi, type ChatMsg } from '../services/api';
-
-const SUGGESTED_REPLIES = ['Yes, show me breakdown', 'Check exchange rate', 'Update goal target'];
-const QUICK_ACTIONS = [
-  { icon: 'send' as const, label: 'Send Money' },
-  { icon: 'piggy-bank' as const, label: 'Savings' },
-  { icon: 'home' as const, label: 'Building' },
-  { icon: 'school' as const, label: 'School Fees' },
-];
 
 function TypingDots() {
   const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
@@ -49,41 +41,124 @@ const typingStyles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.onSurfaceVariant + '99' },
 });
 
+// Parse simple markdown: ## heading, **bold**, newlines
+function renderRichText(content: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const lines = content.split('\n');
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      nodes.push(<View key={`sp-${idx}`} style={{ height: 8 }} />);
+      return;
+    }
+
+    if (trimmed.startsWith('## ')) {
+      nodes.push(
+        <Text key={idx} style={richStyles.heading}>
+          {trimmed.replace('## ', '')}
+        </Text>
+      );
+      return;
+    }
+
+    // Split line into segments: **bold** and plain text
+    const segments: { bold: boolean; text: string }[] = [];
+    let remaining = trimmed;
+    let segIdx = 0;
+    while (remaining.length > 0 && segIdx < 20) {
+      segIdx++;
+      const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
+      if (boldMatch && boldMatch.index !== undefined) {
+        if (boldMatch.index > 0) segments.push({ bold: false, text: remaining.substring(0, boldMatch.index) });
+        segments.push({ bold: true, text: boldMatch[1] });
+        remaining = remaining.substring(boldMatch.index + boldMatch[0].length);
+      } else {
+        segments.push({ bold: false, text: remaining });
+        remaining = '';
+      }
+    }
+
+    // Check for emoji/list prefix
+    const hasEmojiPrefix = /^[✅⚠️❌🎯🎉💸💰🏠📋💱📅⏰●→←]\s/.test(trimmed) || /^[•·]/.test(trimmed);
+
+    nodes.push(
+      <Text key={idx} style={[richStyles.line, hasEmojiPrefix && { flexDirection: 'row' as any }]}>
+        {segments.map((seg, si) => (
+          <Text key={si} style={seg.bold ? richStyles.bold : richStyles.normal}>
+            {seg.text}
+          </Text>
+        ))}
+      </Text>
+    );
+  });
+
+  return nodes;
+}
+
+const richStyles = StyleSheet.create({
+  heading: {
+    fontSize: Typography.headlineSm.fontSize,
+    fontFamily: 'Montserrat',
+    fontWeight: '700',
+    color: Colors.primary,
+    marginBottom: 4,
+    marginTop: 4,
+  },
+  line: {
+    fontSize: Typography.bodyMd.fontSize,
+    fontFamily: 'Inter',
+    color: Colors.onSurface,
+    lineHeight: 22,
+  },
+  bold: {
+    fontWeight: '700',
+    fontFamily: 'Inter',
+    color: Colors.primary,
+  },
+  normal: {
+    fontWeight: '400',
+    fontFamily: 'Inter',
+    color: Colors.onSurface,
+  },
+});
+
 export default function AIAssistant() {
   const [message, setMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
-  useEffect(() => {
-    chatApi.list().then((res) => {
-      if (res.success && res.data) setMessages(res.data);
-      setLoading(false);
-    });
+  const loadData = useCallback(async () => {
+    const [chatRes, sugRes] = await Promise.all([chatApi.list(), chatApi.suggestions()]);
+    if (chatRes.success && chatRes.data) setMessages(chatRes.data);
+    if (sugRes.success && sugRes.data) setSuggestions(sugRes.data);
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
-  const handleSend = async () => {
-    if (!message.trim()) return;
-    setIsTyping(true);
-    const userMsg = message.trim();
+  useEffect(() => { loadData(); }, []);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadData();
+  }, [loadData]);
+
+  const sendMessage = async (text: string) => {
+    if (!text.trim()) return;
+    const userMsg = text.trim();
     setMessage('');
-    const res = await chatApi.send(userMsg);
-    if (res.success && res.data) setMessages(res.data);
-    setIsTyping(false);
-  };
-
-  const handleQuickAction = async (label: string) => {
     setIsTyping(true);
-    const res = await chatApi.send(`I want to ${label}`);
-    if (res.success && res.data) setMessages(res.data);
-    setIsTyping(false);
-  };
-
-  const handleSuggested = async (text: string) => {
-    setIsTyping(true);
-    const res = await chatApi.send(text);
-    if (res.success && res.data) setMessages(res.data);
+    setError(null);
+    const [chatRes, sugRes] = await Promise.all([chatApi.send(userMsg), chatApi.suggestions()]);
+    if (chatRes.success && chatRes.data) setMessages(chatRes.data);
+    else setError('Failed to send message. Please try again.');
+    if (sugRes.success && sugRes.data) setSuggestions(sugRes.data);
     setIsTyping(false);
   };
 
@@ -101,7 +176,7 @@ export default function AIAssistant() {
           <View>
             <Text style={styles.headerTitle}>Kanzu</Text>
             <Text style={styles.headerSub}>
-              {isTyping ? 'Typing...' : 'Online • AI Companion'}
+              {isTyping ? 'Thinking...' : 'Online • AI Financial Companion'}
             </Text>
           </View>
         </View>
@@ -117,6 +192,7 @@ export default function AIAssistant() {
           contentContainerStyle={styles.chatContent}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
         >
           {loading ? (
             <ActivityIndicator color={Colors.primary} style={{ marginTop: 40 }} />
@@ -127,14 +203,30 @@ export default function AIAssistant() {
                 <Text style={styles.dateText}>Today</Text>
               </View>
 
+              {error && (
+                <View style={styles.errorBanner}>
+                  <MaterialCommunityIcons name="alert-circle" size={16} color={Colors.onError} />
+                  <Text style={styles.errorText}>{error}</Text>
+                  <TouchableOpacity onPress={() => setError(null)}>
+                    <MaterialCommunityIcons name="close" size={16} color={Colors.onError} />
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {messages.length <= 1 && (
                 <View style={styles.quickActionRow}>
-                  {QUICK_ACTIONS.map((action) => (
-                    <TouchableOpacity key={action.label} style={styles.quickActionChip} activeOpacity={0.7} onPress={() => handleQuickAction(action.label)}>
-                      <MaterialCommunityIcons name={action.icon} size={18} color={Colors.primary} />
-                      <Text style={styles.quickActionLabel}>{action.label}</Text>
-                    </TouchableOpacity>
-                  ))}
+                  <TouchableOpacity style={styles.quickActionChip} activeOpacity={0.7} onPress={() => sendMessage('Send money to Uganda')}>
+                    <MaterialCommunityIcons name="send" size={18} color={Colors.primary} />
+                    <Text style={styles.quickActionLabel}>Send Money</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.quickActionChip} activeOpacity={0.7} onPress={() => sendMessage('Check my goal progress')}>
+                    <MaterialCommunityIcons name="piggy-bank" size={18} color={Colors.primary} />
+                    <Text style={styles.quickActionLabel}>Savings</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.quickActionChip} activeOpacity={0.7} onPress={() => sendMessage('How much do I have?')}>
+                    <MaterialCommunityIcons name="wallet" size={18} color={Colors.primary} />
+                    <Text style={styles.quickActionLabel}>Balance</Text>
+                  </TouchableOpacity>
                 </View>
               )}
 
@@ -142,7 +234,9 @@ export default function AIAssistant() {
                 msg.role === 'user' ? (
                   <View key={i} style={styles.userMessage}>
                     <Text style={styles.userMessageText}>{msg.content}</Text>
-                    <Text style={styles.messageTime}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                    <Text style={styles.messageTime}>
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
                   </View>
                 ) : (
                   <View key={i} style={styles.aiRow}>
@@ -151,14 +245,16 @@ export default function AIAssistant() {
                     </View>
                     <View style={styles.aiBlock}>
                       <View style={styles.aiMessage}>
-                        <Text style={styles.aiMessageText}>{msg.content}</Text>
-                        <Text style={styles.messageTime}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                        {renderRichText(msg.content)}
+                        <Text style={styles.messageTime}>
+                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
                       </View>
-                      {i === messages.length - 1 && msg.role === 'assistant' && messages.length > 1 && (
+                      {i === messages.length - 1 && msg.role === 'assistant' && suggestions.length > 0 && (
                         <View style={styles.suggestedRow}>
-                          {SUGGESTED_REPLIES.map((reply) => (
-                            <TouchableOpacity key={reply} style={styles.suggestedChip} activeOpacity={0.7} onPress={() => handleSuggested(reply)}>
-                              <Text style={styles.chipText}>{reply}</Text>
+                          {suggestions.slice(0, 4).map((reply) => (
+                            <TouchableOpacity key={reply} style={styles.suggestedChip} activeOpacity={0.7} onPress={() => sendMessage(reply)}>
+                              <Text style={styles.chipText}>{reply.length > 35 ? reply.substring(0, 32) + '...' : reply}</Text>
                             </TouchableOpacity>
                           ))}
                         </View>
@@ -183,26 +279,30 @@ export default function AIAssistant() {
         </ScrollView>
 
         <View style={styles.inputArea}>
-        <View style={styles.inputRow}>
-          <TouchableOpacity style={styles.inputIcon}>
-            <MaterialCommunityIcons name="plus" size={24} color={Colors.primaryContainer} />
-          </TouchableOpacity>
-          <TextInput
-            style={styles.input}
-            placeholder="Message Twala..."
-            placeholderTextColor={Colors.outline}
-            value={message}
-            onChangeText={setMessage}
-            multiline
-          />
-          <TouchableOpacity style={styles.inputIcon}>
-            <MaterialCommunityIcons name="microphone" size={24} color={Colors.primaryContainer} />
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]} onPress={handleSend} disabled={!message.trim()}>
-            <MaterialCommunityIcons name="arrow-up" size={24} color={message.trim() ? Colors.onPrimary : Colors.onSurfaceVariant} />
-          </TouchableOpacity>
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.input}
+              placeholder="Ask Kanzu anything..."
+              placeholderTextColor={Colors.outline}
+              value={message}
+              onChangeText={setMessage}
+              multiline
+              onSubmitEditing={() => sendMessage(message)}
+              blurOnSubmit
+            />
+            <TouchableOpacity
+              style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
+              onPress={() => sendMessage(message)}
+              disabled={!message.trim()}
+            >
+              <MaterialCommunityIcons
+                name="arrow-up"
+                size={24}
+                color={message.trim() ? Colors.onPrimary : Colors.onSurfaceVariant}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
       </KeyboardAvoidingView>
     </View>
   );
@@ -236,30 +336,18 @@ const styles = StyleSheet.create({
   aiAvatarSmall: { width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.secondaryContainer, justifyContent: 'center', alignItems: 'center' },
   aiBlock: { flex: 1, gap: 8 },
   aiMessage: { backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: 20, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: Colors.outlineVariant + '1A', ...Shadow.level1 },
-  aiMessageText: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.onSurface, lineHeight: 24 },
-  dataCard: {
-    backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: BorderRadius.xl,
-    borderWidth: 1, borderColor: Colors.outlineVariant + '33', ...Shadow.level1, overflow: 'hidden', position: 'relative',
-  },
-  dataCardDecor: { position: 'absolute', top: 12, right: 12, opacity: 0.08 },
-  dataLabel: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurfaceVariant, letterSpacing: 1, textTransform: 'uppercase' },
-  dataValueRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  dataValue: { fontSize: Typography.headlineSm.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
-  dataBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.secondaryContainer, paddingHorizontal: 8, paddingVertical: 3, borderRadius: BorderRadius.full },
-  dataBadgeText: { fontSize: 11, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSecondaryContainer },
-  dataBarBg: { width: '100%', height: 8, backgroundColor: Colors.surfaceContainerHighest, borderRadius: BorderRadius.full, marginTop: Spacing.stackMd, overflow: 'hidden' },
-  dataBarFill: { height: '100%', backgroundColor: Colors.secondaryContainer, borderRadius: BorderRadius.full },
-  dataBarLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
-  dataBarLabelLeft: { fontSize: 11, fontFamily: 'Inter', color: Colors.onSurfaceVariant },
-  dataBarLabelRight: { fontSize: 11, fontFamily: 'Inter', color: Colors.outline },
   suggestedRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   suggestedChip: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: Colors.surfaceContainerLow, borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.primaryFixedDim + '4D', ...Shadow.level1 },
   chipText: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.primary },
   typingBubble: { backgroundColor: Colors.surfaceContainerLowest, borderRadius: 20, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: Colors.outlineVariant + '1A', paddingHorizontal: 16, ...Shadow.level1 },
   inputArea: { paddingHorizontal: Spacing.containerPaddingMobile, paddingVertical: Spacing.stackSm, backgroundColor: Colors.background, borderTopWidth: 1, borderTopColor: Colors.outlineVariant + '4D' },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, backgroundColor: Colors.surfaceContainerLowest, padding: 8, borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: Colors.outlineVariant + '4D', ...Shadow.level2 },
-  inputIcon: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', borderRadius: BorderRadius.lg },
   input: { flex: 1, fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.onSurface, paddingVertical: 8, paddingHorizontal: 4, maxHeight: 100 },
   sendButton: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.primary, borderRadius: BorderRadius.lg, ...Shadow.level1 },
   sendButtonDisabled: { backgroundColor: Colors.surfaceContainerHigh },
+  errorBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.errorContainer,
+    padding: Spacing.stackMd, borderRadius: BorderRadius.lg, marginBottom: Spacing.gutter,
+  },
+  errorText: { flex: 1, fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onError },
 });

@@ -101,6 +101,7 @@ export const chatApi = {
   list: () => request<ChatMsg[]>('/chat'),
   send: (message: string) => request<ChatMsg[]>('/chat', { method: 'POST', body: JSON.stringify({ message }) }),
   clear: () => request<ChatMsg[]>('/chat', { method: 'DELETE' }),
+  suggestions: () => request<string[]>('/chat/suggestions'),
 };
 
 // Rates
