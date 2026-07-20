@@ -194,223 +194,225 @@ export default function SmartTransfer() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <StellarPath mode={mode} />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <StellarPath mode={mode} />
 
-        <View style={styles.modeToggle}>
-          <TouchableOpacity
-            style={[styles.modeButton, mode === 'send' && styles.modeButtonActive]}
-            onPress={() => setMode('send')}
-          >
-            <MaterialCommunityIcons name="send" size={18} color={mode === 'send' ? Colors.onPrimary : Colors.primary} />
-            <Text style={[styles.modeText, mode === 'send' && styles.modeTextActive]}>Send</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.modeButton, mode === 'deposit' && styles.modeButtonActive]}
-            onPress={() => setMode('deposit')}
-          >
-            <MaterialCommunityIcons name="download" size={18} color={mode === 'deposit' ? Colors.onPrimary : Colors.primary} />
-            <Text style={[styles.modeText, mode === 'deposit' && styles.modeTextActive]}>Deposit</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.rateBanner}>
-          <MaterialCommunityIcons name="currency-usd" size={16} color={Colors.onPrimary} />
-          <Text style={styles.rateText}>
-            1 USDC ≈ UGX {liveRate.toLocaleString()}
-          </Text>
-          <View style={styles.rateLiveDot} />
-          <Text style={styles.rateLiveLabel}>Live</Text>
-        </View>
-
-        <Animated.View style={[styles.amountCard, { transform: [{ scale: scaleAnim }] }]}>
-          <Text style={styles.amountLabel}>{mode === 'send' ? 'You Send' : 'You Deposit'}</Text>
-          <View style={styles.amountRow}>
-            <Text style={styles.currencySign}>
-              {mode === 'send' ? '$' : 'UGX'}
-            </Text>
-            <TextInput
-              style={styles.amountInput}
-              value={amount}
-              onChangeText={setAmount}
-              keyboardType="decimal-pad"
-              placeholder={mode === 'send' ? '500' : '1,000,000'}
-              placeholderTextColor={Colors.outline}
-            />
+          <View style={styles.modeToggle}>
+            <TouchableOpacity
+              style={[styles.modeButton, mode === 'send' && styles.modeButtonActive]}
+              onPress={() => setMode('send')}
+            >
+              <MaterialCommunityIcons name="send" size={18} color={mode === 'send' ? Colors.onPrimary : Colors.primary} />
+              <Text style={[styles.modeText, mode === 'send' && styles.modeTextActive]}>Send</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeButton, mode === 'deposit' && styles.modeButtonActive]}
+              onPress={() => setMode('deposit')}
+            >
+              <MaterialCommunityIcons name="download" size={18} color={mode === 'deposit' ? Colors.onPrimary : Colors.primary} />
+              <Text style={[styles.modeText, mode === 'deposit' && styles.modeTextActive]}>Deposit</Text>
+            </TouchableOpacity>
           </View>
-          {mode === 'send' && (
-            <View style={styles.amountMeta}>
-              <Text style={styles.amountMetaText}>≈ UGX {((usdAmount * liveRate) || 0).toLocaleString()}</Text>
+
+          <View style={styles.rateBanner}>
+            <MaterialCommunityIcons name="currency-usd" size={16} color={Colors.onPrimary} />
+            <Text style={styles.rateText}>
+              1 USDC ≈ UGX {liveRate.toLocaleString()}
+            </Text>
+            <View style={styles.rateLiveDot} />
+            <Text style={styles.rateLiveLabel}>Live</Text>
+          </View>
+
+          <Animated.View style={[styles.amountCard, { transform: [{ scale: scaleAnim }] }]}>
+            <Text style={styles.amountLabel}>{mode === 'send' ? 'You Send' : 'You Deposit'}</Text>
+            <View style={styles.amountRow}>
+              <Text style={styles.currencySign}>
+                {mode === 'send' ? '$' : 'UGX'}
+              </Text>
+              <TextInput
+                style={styles.amountInput}
+                value={amount}
+                onChangeText={setAmount}
+                keyboardType="decimal-pad"
+                placeholder={mode === 'send' ? '500' : '1,000,000'}
+                placeholderTextColor={Colors.outline}
+              />
+            </View>
+            {mode === 'send' && (
+              <View style={styles.amountMeta}>
+                <Text style={styles.amountMetaText}>≈ UGX {((usdAmount * liveRate) || 0).toLocaleString()}</Text>
+              </View>
+            )}
+          </Animated.View>
+
+          {mode === 'send' && quote && (
+            <View style={styles.quoteCard}>
+              <Text style={styles.quoteTitle}>Transfer Breakdown</Text>
+              <View style={styles.quoteRow}>
+                <Text style={styles.quoteLabel}>Amount</Text>
+                <Text style={styles.quoteValue}>${quote.sendAmountUsdc.toFixed(2)} USDC</Text>
+              </View>
+              <View style={styles.quoteRow}>
+                <Text style={styles.quoteLabel}>Fee (0.5%)</Text>
+                <Text style={styles.quoteValue}>${quote.feeUsdc.toFixed(2)} USDC</Text>
+              </View>
+              <View style={styles.quoteDivider} />
+              <View style={styles.quoteRow}>
+                <Text style={[styles.quoteLabel, { fontWeight: '700' }]}>Recipient Gets</Text>
+                <Text style={[styles.quoteValue, { color: Colors.primary, fontWeight: '700' }]}>
+                  UGX {quote.receiveAmountUgx.toLocaleString()}
+                </Text>
+              </View>
+              <View style={styles.quoteRow}>
+                <Text style={styles.quoteLabel}>Rate</Text>
+                <Text style={styles.quoteValue}>1 USDC = UGX {quote.rate.toLocaleString()}</Text>
+              </View>
+              <View style={styles.quoteRow}>
+                <Text style={styles.quoteLabel}>Delivery</Text>
+                <Text style={styles.quoteValue}>{quote.estimatedArrival}</Text>
+              </View>
             </View>
           )}
-        </Animated.View>
 
-        {mode === 'send' && quote && (
-          <View style={styles.quoteCard}>
-            <Text style={styles.quoteTitle}>Transfer Breakdown</Text>
-            <View style={styles.quoteRow}>
-              <Text style={styles.quoteLabel}>Amount</Text>
-              <Text style={styles.quoteValue}>${quote.sendAmountUsdc.toFixed(2)} USDC</Text>
+          {mode === 'deposit' && (
+            <View style={styles.quoteCard}>
+              <Text style={styles.quoteTitle}>Estimated Deposit</Text>
+              <View style={styles.quoteRow}>
+                <Text style={styles.quoteLabel}>You Pay</Text>
+                <Text style={styles.quoteValue}>UGX {((usdAmount || 0) * liveRate).toLocaleString()}</Text>
+              </View>
+              <View style={styles.quoteRow}>
+                <Text style={styles.quoteLabel}>You Receive (est.)</Text>
+                <Text style={styles.quoteValue}>
+                  ${(((usdAmount || 0) * liveRate * 0.98) / liveRate).toFixed(2)} USDC
+                </Text>
+              </View>
+              <View style={styles.quoteRow}>
+                <Text style={styles.quoteLabel}>Fee (2%)</Text>
+                <Text style={styles.quoteValue}>UGX {Math.round(((usdAmount || 0) * liveRate * 0.02)).toLocaleString()}</Text>
+              </View>
+              <View style={styles.quoteDivider} />
+              <View style={styles.quoteRow}>
+                <Text style={styles.quoteLabel}>Rate</Text>
+                <Text style={styles.quoteValue}>1 USDC ≈ UGX {liveRate.toLocaleString()}</Text>
+              </View>
             </View>
-            <View style={styles.quoteRow}>
-              <Text style={styles.quoteLabel}>Fee (0.5%)</Text>
-              <Text style={styles.quoteValue}>${quote.feeUsdc.toFixed(2)} USDC</Text>
-            </View>
-            <View style={styles.quoteDivider} />
-            <View style={styles.quoteRow}>
-              <Text style={[styles.quoteLabel, { fontWeight: '700' }]}>Recipient Gets</Text>
-              <Text style={[styles.quoteValue, { color: Colors.primary, fontWeight: '700' }]}>
-                UGX {quote.receiveAmountUgx.toLocaleString()}
-              </Text>
-            </View>
-            <View style={styles.quoteRow}>
-              <Text style={styles.quoteLabel}>Rate</Text>
-              <Text style={styles.quoteValue}>1 USDC = UGX {quote.rate.toLocaleString()}</Text>
-            </View>
-            <View style={styles.quoteRow}>
-              <Text style={styles.quoteLabel}>Delivery</Text>
-              <Text style={styles.quoteValue}>{quote.estimatedArrival}</Text>
-            </View>
-          </View>
-        )}
+          )}
 
-        {mode === 'deposit' && (
-          <View style={styles.quoteCard}>
-            <Text style={styles.quoteTitle}>Estimated Deposit</Text>
-            <View style={styles.quoteRow}>
-              <Text style={styles.quoteLabel}>You Pay</Text>
-              <Text style={styles.quoteValue}>UGX {((usdAmount || 0) * liveRate).toLocaleString()}</Text>
-            </View>
-            <View style={styles.quoteRow}>
-              <Text style={styles.quoteLabel}>You Receive (est.)</Text>
-              <Text style={styles.quoteValue}>
-                ${(((usdAmount || 0) * liveRate * 0.98) / liveRate).toFixed(2)} USDC
-              </Text>
-            </View>
-            <View style={styles.quoteRow}>
-              <Text style={styles.quoteLabel}>Fee (2%)</Text>
-              <Text style={styles.quoteValue}>UGX {Math.round(((usdAmount || 0) * liveRate * 0.02)).toLocaleString()}</Text>
-            </View>
-            <View style={styles.quoteDivider} />
-            <View style={styles.quoteRow}>
-              <Text style={styles.quoteLabel}>Rate</Text>
-              <Text style={styles.quoteValue}>1 USDC ≈ UGX {liveRate.toLocaleString()}</Text>
-            </View>
-          </View>
-        )}
+          {loading && <ActivityIndicator color={Colors.primary} style={{ marginTop: 12 }} />}
 
-        {loading && <ActivityIndicator color={Colors.primary} style={{ marginTop: 12 }} />}
+          <View style={styles.recipientCard}>
+            <Text style={styles.sectionLabel}>{mode === 'send' ? 'Recipient Details' : 'Your Details'}</Text>
 
-        <View style={styles.recipientCard}>
-          <Text style={styles.sectionLabel}>{mode === 'send' ? 'Recipient Details' : 'Your Details'}</Text>
+            {mode === 'send' && (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Full name (e.g., Maama Namubiru)"
+                  placeholderTextColor={Colors.outline}
+                  value={recipientName}
+                  onChangeText={setRecipientName}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Phone (optional, e.g., +256712345678)"
+                  placeholderTextColor={Colors.outline}
+                  value={recipientPhone}
+                  onChangeText={setRecipientPhone}
+                  keyboardType="phone-pad"
+                />
+              </>
+            )}
 
-          {mode === 'send' && (
-            <>
+            {mode === 'deposit' && (
               <TextInput
                 style={styles.input}
-                placeholder="Full name (e.g., Maama Namubiru)"
-                placeholderTextColor={Colors.outline}
-                value={recipientName}
-                onChangeText={setRecipientName}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Phone (optional, e.g., +256712345678)"
+                placeholder="Your MTN/Airtel phone number"
                 placeholderTextColor={Colors.outline}
                 value={recipientPhone}
                 onChangeText={setRecipientPhone}
                 keyboardType="phone-pad"
               />
-            </>
-          )}
+            )}
 
-          {mode === 'deposit' && (
-            <TextInput
-              style={styles.input}
-              placeholder="Your MTN/Airtel phone number"
-              placeholderTextColor={Colors.outline}
-              value={recipientPhone}
-              onChangeText={setRecipientPhone}
-              keyboardType="phone-pad"
-            />
-          )}
+            <View style={styles.networkRow}>
+              {NETWORKS.map((net) => (
+                <TouchableOpacity
+                  key={net}
+                  style={[styles.networkChip, recipientNetwork === net && styles.networkChipActive]}
+                  onPress={() => setRecipientNetwork(net as 'MTN' | 'AIRTEL')}
+                >
+                  <MaterialCommunityIcons
+                    name={net === 'MTN' ? 'signal-cellular-3' : 'signal-cellular-2'}
+                    size={16}
+                    color={recipientNetwork === net ? Colors.onPrimary : Colors.primary}
+                  />
+                  <Text style={[styles.networkText, recipientNetwork === net && styles.networkTextActive]}>
+                    {net}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
-          <View style={styles.networkRow}>
-            {NETWORKS.map((net) => (
-              <TouchableOpacity
-                key={net}
-                style={[styles.networkChip, recipientNetwork === net && styles.networkChipActive]}
-                onPress={() => setRecipientNetwork(net as 'MTN' | 'AIRTEL')}
-              >
-                <MaterialCommunityIcons
-                  name={net === 'MTN' ? 'signal-cellular-3' : 'signal-cellular-2'}
-                  size={16}
-                  color={recipientNetwork === net ? Colors.onPrimary : Colors.primary}
-                />
-                <Text style={[styles.networkText, recipientNetwork === net && styles.networkTextActive]}>
-                  {net}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {mode === 'send' && (
+              <>
+                <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Purpose</Text>
+                <TouchableOpacity style={styles.purposePicker} onPress={() => setShowPicker(!showPicker)}>
+                  <View style={styles.purposeRow}>
+                    <MaterialCommunityIcons name={selectedPurpose.icon} size={20} color={Colors.primary} />
+                    <View style={styles.purposeTextWrap}>
+                      <Text style={styles.purposeLabel}>{selectedPurpose.label}</Text>
+                      <Text style={styles.purposeDesc}>{selectedPurpose.desc}</Text>
+                    </View>
+                    <MaterialCommunityIcons name={showPicker ? 'chevron-up' : 'chevron-down'} size={20} color={Colors.outline} />
+                  </View>
+                </TouchableOpacity>
+
+                {showPicker && (
+                  <View style={styles.pickerList}>
+                    {PURPOSES.map((p) => (
+                      <TouchableOpacity
+                        key={p.value}
+                        style={[styles.pickerItem, selectedPurpose.value === p.value && styles.pickerItemActive]}
+                        onPress={() => { setSelectedPurpose(p); setShowPicker(false); }}
+                      >
+                        <MaterialCommunityIcons name={p.icon} size={20} color={selectedPurpose.value === p.value ? Colors.primary : Colors.onSurfaceVariant} />
+                        <View>
+                          <Text style={[styles.pickerLabel, selectedPurpose.value === p.value && { color: Colors.primary }]}>{p.label}</Text>
+                          <Text style={styles.pickerDesc}>{p.desc}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
           </View>
 
-          {mode === 'send' && (
-            <>
-              <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Purpose</Text>
-              <TouchableOpacity style={styles.purposePicker} onPress={() => setShowPicker(!showPicker)}>
-                <View style={styles.purposeRow}>
-                  <MaterialCommunityIcons name={selectedPurpose.icon} size={20} color={Colors.primary} />
-                  <View style={styles.purposeTextWrap}>
-                    <Text style={styles.purposeLabel}>{selectedPurpose.label}</Text>
-                    <Text style={styles.purposeDesc}>{selectedPurpose.desc}</Text>
-                  </View>
-                  <MaterialCommunityIcons name={showPicker ? 'chevron-up' : 'chevron-down'} size={20} color={Colors.outline} />
-                </View>
-              </TouchableOpacity>
-
-              {showPicker && (
-                <View style={styles.pickerList}>
-                  {PURPOSES.map((p) => (
-                    <TouchableOpacity
-                      key={p.value}
-                      style={[styles.pickerItem, selectedPurpose.value === p.value && styles.pickerItemActive]}
-                      onPress={() => { setSelectedPurpose(p); setShowPicker(false); }}
-                    >
-                      <MaterialCommunityIcons name={p.icon} size={20} color={selectedPurpose.value === p.value ? Colors.primary : Colors.onSurfaceVariant} />
-                      <View>
-                        <Text style={[styles.pickerLabel, selectedPurpose.value === p.value && { color: Colors.primary }]}>{p.label}</Text>
-                        <Text style={styles.pickerDesc}>{p.desc}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-            </>
-          )}
-        </View>
-
-        <TouchableOpacity
-          style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-          activeOpacity={0.8}
-          onPress={handleSubmit}
-          disabled={submitting}
-        >
-          {submitting ? (
-            <ActivityIndicator color={Colors.onPrimary} />
-          ) : (
-            <>
-              <MaterialCommunityIcons
-                name={mode === 'send' ? 'send' : 'download'}
-                size={20}
-                color={Colors.onPrimary}
-              />
-              <Text style={styles.submitText}>
-                {mode === 'send' ? 'Send via Kotani Pay' : 'Request via Kotani Pay'}
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </ScrollView>
+          <TouchableOpacity
+            style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+            activeOpacity={0.8}
+            onPress={handleSubmit}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <ActivityIndicator color={Colors.onPrimary} />
+            ) : (
+              <>
+                <MaterialCommunityIcons
+                  name={mode === 'send' ? 'send' : 'download'}
+                  size={20}
+                  color={Colors.onPrimary}
+                />
+                <Text style={styles.submitText}>
+                  {mode === 'send' ? 'Send via Kotani Pay' : 'Request via Kotani Pay'}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
