@@ -579,4 +579,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   supportIcon: {
-    position: 'abso
+    position: 'absolute',
+    bottom: -8,
+    right: -8,
+    opacity: 0.1,
+  },
+});
