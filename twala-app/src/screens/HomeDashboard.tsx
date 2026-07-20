@@ -1,8 +1,9 @@
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, StyleSheet, Image, Dimensions } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, RefreshControl, StyleSheet, Image, Dimensions, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 import type { AppScreen } from '../components/BottomNavBar';
+import { walletApi, ratesApi, historyApi, goalsApi, type GoalData } from '../services/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -13,26 +14,6 @@ const QUICK_SEND = [
   { name: 'Taata', initials: 'T', color: Colors.tertiaryFixedDim, bg: Colors.tertiaryContainer },
 ];
 
-const GOALS = [
-  {
-    title: 'Build My Home', phase: 'Foundation Phase', icon: 'home' as const,
-    iconBg: Colors.primaryFixed, iconColor: Colors.primary,
-    saved: '20M', target: '150M', progress: 13.3, progressColor: Colors.primary,
-  },
-  {
-    title: 'Buy Land in Wakiso', phase: 'Acquisition', icon: 'grass' as const,
-    iconBg: Colors.tertiaryFixed, iconColor: Colors.tertiary,
-    saved: '5M', target: '30M', progress: 16.6, progressColor: Colors.tertiaryContainer,
-  },
-];
-
-const EXCHANGE_RATES = [
-  { from: '1 GBP', to: '4,750 UGX' },
-  { from: '1 USD', to: '3,750 UGX' },
-  { from: '1 EUR', to: '4,100 UGX' },
-  { from: '1 AED', to: '1,020 UGX' },
-];
-
 function getGreeting() {
   const h = new Date().getHours();
   if (h < 12) return 'Good morning';
@@ -40,16 +21,94 @@ function getGreeting() {
   return 'Good evening';
 }
 
-export default function HomeDashboard({ onNavigate }: { onNavigate: (route: AppScreen) => void }) {
+function formatAmount(usdc: number): string {
+  return usdc.toFixed(2);
+}
+
+function formatUgx(ugx: number): string {
+  if (ugx >= 1_000_000) return `${(ugx / 1_000_000).toFixed(1)}M`;
+  if (ugx >= 1_000) return `${(ugx / 1_000).toFixed(1)}K`;
+  return ugx.toLocaleString();
+}
+
+function getGoalIcon(title: string): string {
+  const t = title.toLowerCase();
+  if (t.includes('home') || t.includes('house')) return 'home';
+  if (t.includes('land') || t.includes('wakiso')) return 'grass';
+  if (t.includes('school') || t.includes('fees') || t.includes('education')) return 'school';
+  if (t.includes('car') || t.includes('vehicle')) return 'car';
+  if (t.includes('business') || t.includes('shop')) return 'store';
+  return 'piggy-bank';
+}
+
+const GOAL_COLORS = [
+  { iconBg: Colors.primaryFixed, iconColor: Colors.primary, progressColor: Colors.primary },
+  { iconBg: Colors.tertiaryFixed, iconColor: Colors.tertiary, progressColor: Colors.tertiaryContainer },
+  { iconBg: Colors.secondaryFixed, iconColor: Colors.secondary, progressColor: Colors.secondary },
+];
+
+function getTimeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+export default function HomeDashboard({ onNavigate, onNavigateGoal }: { onNavigate: (route: AppScreen) => void; onNavigateGoal?: (id: string) => void }) {
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [balance, setBalance] = useState(0);
+  const [goals, setGoals] = useState<GoalData[]>([]);
+  const [recentTxs, setRecentTxs] = useState<any[]>([]);
+  const [ratePairs, setRatePairs] = useState<{ from: string; to: string }[]>([]);
   const [rateIndex, setRateIndex] = useState(0);
+
+  const fetchData = useCallback(() => {
+    Promise.all([
+      walletApi.info(),
+      goalsApi.list(),
+      ratesApi.get(),
+      historyApi.list('all'),
+    ]).then(([walRes, goalsRes, rateRes, historyRes]) => {
+      if (walRes.success && walRes.data) {
+        setBalance(walRes.data.balanceUsdc);
+      }
+      if (goalsRes.success && Array.isArray(goalsRes.data)) {
+        setGoals(goalsRes.data);
+      }
+      if (rateRes.success && rateRes.data) {
+        const ugxRate = rateRes.data.usdcToUgx;
+        const pairs = [
+          { from: '1 USD', to: `${rateRes.data.usdToUgx.toLocaleString()} UGX` },
+          { from: '1 USDC', to: `${(rateRes.data.usdcToUgx / 1000).toFixed(1)}K UGX` },
+          { from: '1 GBP', to: `${(rateRes.data.usdToUgx * 1.28).toLocaleString()} UGX` },
+        ];
+        setRatePairs(pairs);
+      }
+      if (historyRes.success && historyRes.data) {
+        setRecentTxs(historyRes.data.transactions?.slice(0, 3) || []);
+      }
+    }).finally(() => { setLoading(false); setRefreshing(false); });
+  }, []);
+
+  useEffect(() => { fetchData(); }, []);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1500);
-  }, []);
+    fetchData();
+  }, [fetchData]);
 
-  const cycleRate = () => setRateIndex((i) => (i + 1) % EXCHANGE_RATES.length);
+  const cycleRate = () => setRateIndex((i) => (i + 1) % (ratePairs.length || 1));
+
+  const overallProgress = goals.length > 0
+    ? Math.round(goals.reduce((s, g) => s + (g.savedAmountUgx / g.targetAmountUgx) * 100, 0) / goals.length)
+    : 0;
+
+  const totalSavedUgx = goals.reduce((s, g) => s + g.savedAmountUgx, 0);
 
   return (
     <View style={styles.container}>
@@ -86,174 +145,187 @@ export default function HomeDashboard({ onNavigate }: { onNavigate: (route: AppS
           <Text style={styles.welcomeTagline}>Your goals are on track this week</Text>
         </View>
 
-        <View style={styles.progressCard}>
-          <View style={styles.progressRing}>
-            <View style={styles.ringOuter}>
-              <View style={styles.ringInner}>
-                <Text style={styles.ringPercent}>65%</Text>
-                <Text style={styles.ringLabel}>overall</Text>
-              </View>
-            </View>
-            <View style={styles.progressRight}>
-              <View style={styles.onTrackBadge}>
-                <MaterialCommunityIcons name="check-circle" size={14} color={Colors.onSecondaryContainer} />
-                <Text style={styles.onTrackText}>On Track</Text>
-              </View>
-              <View style={styles.progressStatItem}>
-                <MaterialCommunityIcons name="calendar-check" size={16} color={Colors.onPrimary} />
-                <Text style={styles.progressStatText}>Target: 2026</Text>
-              </View>
-              <View style={styles.progressStatItem}>
-                <MaterialCommunityIcons name="trophy" size={16} color={Colors.onPrimary} />
-                <Text style={styles.progressStatText}>25.4M UGX saved</Text>
-              </View>
-            </View>
-          </View>
-          <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: '65%' }]} />
-          </View>
-        </View>
-
-        <View style={styles.quickSendSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Quick Send</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAll}>See all</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickSendList}>
-            <TouchableOpacity style={styles.quickSendItem} activeOpacity={0.6}>
-              <View style={styles.quickSendAdd}>
-                <MaterialCommunityIcons name="plus" size={28} color={Colors.primary} />
-              </View>
-              <Text style={styles.quickSendName}>New</Text>
-            </TouchableOpacity>
-            {QUICK_SEND.map((person) => (
-              <TouchableOpacity key={person.name} style={styles.quickSendItem} activeOpacity={0.6}>
-                <View style={[styles.quickSendAvatar, { backgroundColor: person.color }]}>
-                  <Text style={[styles.quickSendInitials, { color: person.bg }]}>{person.initials}</Text>
-                </View>
-                <Text style={styles.quickSendName}>{person.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-
-        <View style={styles.goalsSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Active Goals</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAll}>Manage</Text>
-            </TouchableOpacity>
-          </View>
-          {GOALS.map((goal, index) => (
-            <TouchableOpacity
-              key={index}
-              style={styles.goalCard}
-              activeOpacity={0.7}
-              onPress={() => onNavigate('GoalDetail')}
-            >
-              <View style={styles.goalTop}>
-                <View style={styles.goalInfo}>
-                  <View style={[styles.goalIconBox, { backgroundColor: goal.iconBg }]}>
-                    <MaterialCommunityIcons name={goal.icon} size={22} color={goal.iconColor} />
+        {loading ? (
+          <ActivityIndicator color={Colors.primary} style={{ marginTop: 40 }} />
+        ) : (
+          <>
+            <View style={styles.progressCard}>
+              <View style={styles.progressRing}>
+                <View style={styles.ringOuter}>
+                  <View style={styles.ringInner}>
+                    <Text style={styles.ringPercent}>{overallProgress}%</Text>
+                    <Text style={styles.ringLabel}>overall</Text>
                   </View>
-                  <View style={styles.goalTextWrap}>
-                    <Text style={styles.goalTitle}>{goal.title}</Text>
-                    <View style={styles.goalPhaseRow}>
-                      <View style={[styles.goalPhaseDot, { backgroundColor: goal.progressColor }]} />
-                      <Text style={styles.goalPhase}>{goal.phase}</Text>
+                </View>
+                <View style={styles.progressRight}>
+                  <View style={styles.onTrackBadge}>
+                    <MaterialCommunityIcons name="check-circle" size={14} color={Colors.onSecondaryContainer} />
+                    <Text style={styles.onTrackText}>On Track</Text>
+                  </View>
+                  <View style={styles.progressStatItem}>
+                    <MaterialCommunityIcons name="calendar-check" size={16} color={Colors.onPrimary} />
+                    <Text style={styles.progressStatText}>Balance: ${formatAmount(balance)}</Text>
+                  </View>
+                  <View style={styles.progressStatItem}>
+                    <MaterialCommunityIcons name="trophy" size={16} color={Colors.onPrimary} />
+                    <Text style={styles.progressStatText}>{formatUgx(totalSavedUgx)} UGX saved</Text>
+                  </View>
+                </View>
+              </View>
+              <View style={styles.progressBarBg}>
+                <View style={[styles.progressBarFill, { width: `${overallProgress}%` }]} />
+              </View>
+            </View>
+
+            <View style={styles.quickSendSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Quick Send</Text>
+                <TouchableOpacity>
+                  <Text style={styles.seeAll}>See all</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickSendList}>
+                <TouchableOpacity style={styles.quickSendItem} activeOpacity={0.6}>
+                  <View style={styles.quickSendAdd}>
+                    <MaterialCommunityIcons name="plus" size={28} color={Colors.primary} />
+                  </View>
+                  <Text style={styles.quickSendName}>New</Text>
+                </TouchableOpacity>
+                {QUICK_SEND.map((person) => (
+                  <TouchableOpacity key={person.name} style={styles.quickSendItem} activeOpacity={0.6}>
+                    <View style={[styles.quickSendAvatar, { backgroundColor: person.color }]}>
+                      <Text style={[styles.quickSendInitials, { color: person.bg }]}>{person.initials}</Text>
+                    </View>
+                    <Text style={styles.quickSendName}>{person.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            <View style={styles.goalsSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Active Goals</Text>
+                <TouchableOpacity>
+                  <Text style={styles.seeAll}>Manage</Text>
+                </TouchableOpacity>
+              </View>
+              {goals.length === 0 ? (
+                <Text style={{ textAlign: 'center', color: Colors.onSurfaceVariant, fontFamily: 'Inter', paddingVertical: 20 }}>No goals yet</Text>
+              ) : (
+                goals.map((goal, index) => {
+                  const gc = GOAL_COLORS[index % GOAL_COLORS.length];
+                  const pct = Math.round((goal.savedAmountUgx / goal.targetAmountUgx) * 100);
+                  return (
+                    <TouchableOpacity
+                      key={goal.id || index}
+                      style={styles.goalCard}
+                      activeOpacity={0.7}
+                      onPress={() => onNavigateGoal?.(goal.id)}
+                    >
+                      <View style={styles.goalTop}>
+                        <View style={styles.goalInfo}>
+                          <View style={[styles.goalIconBox, { backgroundColor: gc.iconBg }]}>
+                            <MaterialCommunityIcons name={getGoalIcon(goal.title) as any} size={22} color={gc.iconColor} />
+                          </View>
+                          <View style={styles.goalTextWrap}>
+                            <Text style={styles.goalTitle}>{goal.title}</Text>
+                            <View style={styles.goalPhaseRow}>
+                              <View style={[styles.goalPhaseDot, { backgroundColor: gc.progressColor }]} />
+                              <Text style={styles.goalPhase}>{goal.status || 'In Progress'}</Text>
+                            </View>
+                          </View>
+                        </View>
+                        <Text style={[styles.goalPercent, { color: gc.progressColor }]}>{pct}%</Text>
+                      </View>
+                      <View style={styles.goalProgressRow}>
+                        <Text style={styles.goalSaved}>{formatUgx(goal.savedAmountUgx)} <Text style={styles.goalUnit}>UGX</Text></Text>
+                        <Text style={styles.goalTarget}>Target: {formatUgx(goal.targetAmountUgx)}</Text>
+                      </View>
+                      <View style={styles.goalBarBg}>
+                        <View style={[styles.goalBarFill, { width: `${pct}%`, backgroundColor: gc.progressColor }]} />
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+
+              <TouchableOpacity style={styles.urgentCard} activeOpacity={0.7}>
+                <View style={styles.urgentIconWrap}>
+                  <View style={styles.urgentIcon}>
+                    <MaterialCommunityIcons name="school" size={22} color={Colors.onSecondaryContainer} />
+                  </View>
+                  <View style={styles.urgentPing} />
+                </View>
+                <View style={styles.urgentContent}>
+                  <View style={styles.urgentTop}>
+                    <Text style={styles.urgentTitle}>Junior's School Fees</Text>
+                    <View style={styles.urgentBadge}>
+                      <Text style={styles.urgentBadgeText}>URGENT</Text>
                     </View>
                   </View>
+                  <View style={styles.urgentBottom}>
+                    <MaterialCommunityIcons name="clock-outline" size={14} color={Colors.onSurfaceVariant} />
+                    <Text style={styles.urgentTime}>Upcoming payment in 12 days</Text>
+                  </View>
+                  <View style={styles.urgentProgressMini}>
+                    <View style={styles.urgentProgressFill} />
+                  </View>
                 </View>
-                <Text style={[styles.goalPercent, { color: goal.progressColor }]}>{Math.round(goal.progress)}%</Text>
-              </View>
-              <View style={styles.goalProgressRow}>
-                <Text style={styles.goalSaved}>{goal.saved} <Text style={styles.goalUnit}>UGX</Text></Text>
-                <Text style={styles.goalTarget}>Target: {goal.target}</Text>
-              </View>
-              <View style={styles.goalBarBg}>
-                <View style={[styles.goalBarFill, { width: `${goal.progress}%`, backgroundColor: goal.progressColor }]} />
-              </View>
-            </TouchableOpacity>
-          ))}
-
-          <TouchableOpacity style={styles.urgentCard} activeOpacity={0.7}>
-            <View style={styles.urgentIconWrap}>
-              <View style={styles.urgentIcon}>
-                <MaterialCommunityIcons name="school" size={22} color={Colors.onSecondaryContainer} />
-              </View>
-              <View style={styles.urgentPing} />
+              </TouchableOpacity>
             </View>
-            <View style={styles.urgentContent}>
-              <View style={styles.urgentTop}>
-                <Text style={styles.urgentTitle}>Junior's School Fees</Text>
-                <View style={styles.urgentBadge}>
-                  <Text style={styles.urgentBadgeText}>URGENT</Text>
+
+            <View style={styles.infoGrid}>
+              <TouchableOpacity style={styles.infoCard} onPress={cycleRate} activeOpacity={0.7}>
+                <View style={styles.infoCardHeader}>
+                  <MaterialCommunityIcons name="currency-usd" size={20} color={Colors.secondary} />
+                  <Text style={styles.infoCardBadge}>
+                    <MaterialCommunityIcons name="sync" size={12} color={Colors.secondary} /> Live
+                  </Text>
                 </View>
-              </View>
-              <View style={styles.urgentBottom}>
-                <MaterialCommunityIcons name="clock-outline" size={14} color={Colors.onSurfaceVariant} />
-                <Text style={styles.urgentTime}>Upcoming payment in 12 days</Text>
-              </View>
-              <View style={styles.urgentProgressMini}>
-                <View style={styles.urgentProgressFill} />
-              </View>
+                <Text style={styles.infoLabel}>Exchange Rate</Text>
+                <Text style={styles.infoValue}>
+                  {ratePairs.length > 0
+                    ? `${ratePairs[rateIndex % ratePairs.length].from} = ${ratePairs[rateIndex % ratePairs.length].to}`
+                    : '1 USD = 3,750 UGX'}
+                </Text>
+                <Text style={styles.infoTap}>Tap to cycle</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.supportCard} activeOpacity={0.7} onPress={() => onNavigate('Assistant')}>
+                <MaterialCommunityIcons name="robot" size={28} color={Colors.onTertiary} style={styles.supportIconTop} />
+                <Text style={styles.supportLabel}>Need help?</Text>
+                <Text style={styles.supportValue}>Chat with Kanzu</Text>
+                <View style={styles.supportArrow}>
+                  <MaterialCommunityIcons name="arrow-right" size={20} color={Colors.onTertiary} />
+                </View>
+              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
-        </View>
 
-        <View style={styles.infoGrid}>
-          <TouchableOpacity style={styles.infoCard} onPress={cycleRate} activeOpacity={0.7}>
-            <View style={styles.infoCardHeader}>
-              <MaterialCommunityIcons name="currency-usd" size={20} color={Colors.secondary} />
-              <Text style={styles.infoCardBadge}>
-                <MaterialCommunityIcons name="sync" size={12} color={Colors.secondary} /> Live
-              </Text>
+            <View style={styles.activityPreview}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Recent Activity</Text>
+                <TouchableOpacity onPress={() => onNavigate('History')}>
+                  <Text style={styles.seeAll}>View all</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.activityCard}>
+                {recentTxs.length === 0 ? (
+                  <Text style={{ textAlign: 'center', color: Colors.onSurfaceVariant, fontFamily: 'Inter', paddingVertical: 10 }}>No recent activity</Text>
+                ) : (
+                  recentTxs.map((tx, i) => (
+                    <React.Fragment key={tx.id || i}>
+                      <View style={styles.activityItem}>
+                        <View style={[styles.activityDot, { backgroundColor: tx.type === 'received' ? Colors.secondary : Colors.primary }]} />
+                        <Text style={styles.activityText}>{tx.type === 'received' ? 'Received' : 'Sent'} ${formatAmount(tx.amountUsdc)} to {tx.recipientName}</Text>
+                        <Text style={styles.activityTime}>{getTimeAgo(tx.createdAt)}</Text>
+                      </View>
+                      {i < recentTxs.length - 1 && <View style={styles.activityDivider} />}
+                    </React.Fragment>
+                  ))
+                )}
+              </View>
             </View>
-            <Text style={styles.infoLabel}>Exchange Rate</Text>
-            <Text style={styles.infoValue}>
-              {EXCHANGE_RATES[rateIndex].from} = <Text style={styles.infoHighlight}>{EXCHANGE_RATES[rateIndex].to}</Text>
-            </Text>
-            <Text style={styles.infoTap}>Tap to cycle</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.supportCard} activeOpacity={0.7} onPress={() => onNavigate('Assistant')}>
-            <MaterialCommunityIcons name="robot" size={28} color={Colors.onTertiary} style={styles.supportIconTop} />
-            <Text style={styles.supportLabel}>Need help?</Text>
-            <Text style={styles.supportValue}>Chat with Kanzu</Text>
-            <View style={styles.supportArrow}>
-              <MaterialCommunityIcons name="arrow-right" size={20} color={Colors.onTertiary} />
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.activityPreview}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Activity</Text>
-            <TouchableOpacity onPress={() => onNavigate('History')}>
-              <Text style={styles.seeAll}>View all</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.activityCard}>
-            <View style={styles.activityItem}>
-              <View style={[styles.activityDot, { backgroundColor: Colors.primary }]} />
-              <Text style={styles.activityText}>Sent $250 to Maama</Text>
-              <Text style={styles.activityTime}>2h ago</Text>
-            </View>
-            <View style={styles.activityDivider} />
-            <View style={styles.activityItem}>
-              <View style={[styles.activityDot, { backgroundColor: Colors.primary }]} />
-              <Text style={styles.activityText}>$1,200 released to Sula Contractors</Text>
-              <Text style={styles.activityTime}>Yesterday</Text>
-            </View>
-            <View style={styles.activityDivider} />
-            <View style={styles.activityItem}>
-              <View style={[styles.activityDot, { backgroundColor: Colors.secondary }]} />
-              <Text style={styles.activityText}>School fees reminder set</Text>
-              <Text style={styles.activityTime}>2d ago</Text>
-            </View>
-          </View>
-        </View>
+          </>
+        )}
       </ScrollView>
 
       <TouchableOpacity style={styles.fab} activeOpacity={0.8}>

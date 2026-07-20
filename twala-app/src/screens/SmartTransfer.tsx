@@ -1,7 +1,8 @@
-import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Animated } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Animated, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRef, useEffect, useState } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
+import { transferApi, ratesApi } from '../services/api';
 
 const PURPOSES = [
   { label: 'Family Support', value: 'family', icon: 'face-woman-profile' as const, desc: 'Send to parents or spouse' },
@@ -86,11 +87,31 @@ export default function SmartTransfer() {
   const [selectedPurpose, setSelectedPurpose] = useState(PURPOSES[1]);
   const [showPicker, setShowPicker] = useState(false);
   const [amount, setAmount] = useState('500');
+  const [liveRate, setLiveRate] = useState(3750);
+  const [quote, setQuote] = useState<{ sendAmountUsdc: number; receiveAmountUgx: number; feeUsdc: number; feeUgx: number; rate: number; estimatedArrival: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const usdAmount = parseFloat(amount) || 0;
-  const ugxAmount = usdAmount * 3750;
-  const fee = 1.5;
+
+  useEffect(() => {
+    ratesApi.get().then((res) => {
+      if (res.success && res.data) setLiveRate(res.data.usdcToUgx);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (usdAmount < 10) { setQuote(null); return; }
+    setLoading(true);
+    const timer = setTimeout(() => {
+      transferApi.quote(usdAmount).then((res) => {
+        if (res.success && res.data) setQuote(res.data);
+        setLoading(false);
+      });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [usdAmount]);
 
   useEffect(() => {
     Animated.sequence([
@@ -98,6 +119,25 @@ export default function SmartTransfer() {
       Animated.timing(scaleAnim, { toValue: 1, duration: 100, useNativeDriver: true }),
     ]).start();
   }, [amount]);
+
+  const handleReview = async () => {
+    if (usdAmount < 10) return Alert.alert('Minimum 10 USDC', 'Please enter at least 10 USDC to send.');
+    if (!quote) return Alert.alert('No quote', 'Unable to get exchange rate. Try again.');
+    setSubmitting(true);
+    const res = await transferApi.submit({
+      amountUsdc: usdAmount,
+      recipientName: selectedPurpose.label,
+      purpose: selectedPurpose.label,
+    });
+    setSubmitting(false);
+    if (res.success) {
+      Alert.alert('Transfer Submitted!', res.data?.message || 'Your transfer is being processed.');
+      setAmount('500');
+      setQuote(null);
+    } else {
+      Alert.alert('Error', res.message || 'Transfer failed.');
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -148,7 +188,7 @@ export default function SmartTransfer() {
                   <Text style={[styles.currencyBadgeText, { color: Colors.secondary }]}>UGX</Text>
                 </View>
                 <Animated.Text style={[styles.fieldInputResult, { transform: [{ scale: scaleAnim }] }]}>
-                  {ugxAmount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  {loading ? '...' : (quote?.receiveAmountUgx || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                 </Animated.Text>
               </View>
             </View>
@@ -159,21 +199,21 @@ export default function SmartTransfer() {
               <MaterialCommunityIcons name="bank-transfer" size={18} color={Colors.primary} />
               <View style={styles.detailInfo}>
                 <Text style={styles.detailLabel}>Fee</Text>
-                <Text style={styles.detailValue}>${fee.toFixed(2)}</Text>
+                <Text style={styles.detailValue}>${(quote?.feeUsdc || 0.5).toFixed(2)}</Text>
               </View>
             </View>
             <View style={[styles.detailItem, { backgroundColor: Colors.secondary + '0D' }]}>
               <MaterialCommunityIcons name="lightning-bolt" size={18} color={Colors.secondary} />
               <View style={styles.detailInfo}>
                 <Text style={styles.detailLabel}>Arrival</Text>
-                <Text style={[styles.detailValue, { color: Colors.secondary }]}>~5 seconds</Text>
+                <Text style={[styles.detailValue, { color: Colors.secondary }]}>{quote?.estimatedArrival || '~5 seconds'}</Text>
               </View>
             </View>
             <View style={[styles.detailItem, { backgroundColor: Colors.tertiary + '0D' }]}>
               <MaterialCommunityIcons name="swap-horizontal-bold" size={18} color={Colors.tertiary} />
               <View style={styles.detailInfo}>
                 <Text style={styles.detailLabel}>Rate</Text>
-                <Text style={[styles.detailValue, { color: Colors.tertiary }]}>3,750</Text>
+                <Text style={[styles.detailValue, { color: Colors.tertiary }]}>{quote?.rate.toLocaleString() || '3,750'}</Text>
               </View>
             </View>
           </View>
@@ -219,11 +259,16 @@ export default function SmartTransfer() {
           )}
         </View>
 
-        <TouchableOpacity style={styles.reviewButton} activeOpacity={0.8}>
+        <TouchableOpacity
+          style={[styles.reviewButton, submitting && { opacity: 0.6 }]}
+          activeOpacity={0.8}
+          onPress={handleReview}
+          disabled={submitting}
+        >
           <View style={styles.reviewButtonContent}>
-            <Text style={styles.reviewButtonText}>Review Transfer</Text>
+            <Text style={styles.reviewButtonText}>{submitting ? 'Processing...' : 'Review Transfer'}</Text>
             <Text style={styles.reviewButtonSub}>
-              ${usdAmount.toFixed(2)} → {ugxAmount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} UGX
+              ${usdAmount.toFixed(2)} → {(quote?.receiveAmountUgx || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} UGX
             </Text>
           </View>
           <View style={styles.reviewArrow}>

@@ -12,6 +12,7 @@ import { Colors } from '../theme';
 export default function AppNavigator() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('Dashboard');
   const [history, setHistory] = useState<AppScreen[]>([]);
+  const [goalId, setGoalId] = useState<string | null>(null);
 
   const navigate = (screen: AppScreen) => {
     if (screen === 'GoalDetail') {
@@ -25,7 +26,14 @@ export default function AppNavigator() {
     }
   };
 
+  const navigateToGoal = (id: string) => {
+    setGoalId(id);
+    setHistory((prev) => [...prev, currentScreen]);
+    setCurrentScreen('GoalDetail');
+  };
+
   const handleBack = () => {
+    setGoalId(null);
     const prev = history[history.length - 1];
     if (prev) {
       setHistory((prevH) => prevH.slice(0, -1));
@@ -36,17 +44,17 @@ export default function AppNavigator() {
   const renderScreen = () => {
     switch (currentScreen) {
       case 'Dashboard':
-        return <HomeDashboard onNavigate={navigate} />;
+        return <HomeDashboard onNavigate={navigate} onNavigateGoal={navigateToGoal} />;
       case 'Assistant':
         return <AIAssistant />;
       case 'Transfer':
         return <SmartTransfer />;
       case 'GoalDetail':
-        return <GoalDetail onBack={handleBack} />;
+        return <GoalDetail goalId={goalId} onBack={handleBack} />;
       case 'History':
         return <History />;
       default:
-        return <HomeDashboard onNavigate={navigate} />;
+        return <HomeDashboard onNavigate={navigate} onNavigateGoal={navigateToGoal} />;
     }
   };
 

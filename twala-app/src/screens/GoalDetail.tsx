@@ -1,7 +1,8 @@
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Image, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
+import { goalsApi, type GoalData } from '../services/api';
 
 const TABS = ['Overview', 'Milestones', 'Payments'];
 
@@ -38,8 +39,38 @@ const TRANSACTIONS = [
   { name: 'Architect Fees', subtitle: 'Design Phase • Jun 15', icon: 'draw-pen' as const, amount: '+$800.00', verified: true },
 ];
 
-export default function GoalDetail({ onBack }: { onBack?: () => void }) {
+function formatUgx(ugx: number): string {
+  if (ugx >= 1_000_000) return `UGX ${(ugx / 1_000_000).toFixed(1)}M`;
+  if (ugx >= 1_000) return `UGX ${(ugx / 1_000).toFixed(1)}K`;
+  return `UGX ${ugx.toLocaleString()}`;
+}
+
+function formatUsdc(ugx: number, rate: number): string {
+  return `$${(ugx / rate).toFixed(2)}`;
+}
+
+export default function GoalDetail({ goalId, onBack }: { goalId?: string | null; onBack?: () => void }) {
   const [activeTab, setActiveTab] = useState('Overview');
+  const [goal, setGoal] = useState<GoalData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!goalId) { setLoading(false); return; }
+    goalsApi.get(goalId).then((res) => {
+      if (res.success && res.data) setGoal(res.data);
+      setLoading(false);
+    });
+  }, [goalId]);
+
+  const pct = goal && goal.targetAmountUgx > 0 ? Math.round((goal.savedAmountUgx / goal.targetAmountUgx) * 100) : 0;
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator color={Colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -68,26 +99,26 @@ export default function GoalDetail({ onBack }: { onBack?: () => void }) {
             <View style={styles.heroOverlay}>
               <View style={styles.heroBadge}>
                 <MaterialCommunityIcons name="home" size={14} color={Colors.onSecondaryContainer} />
-                <Text style={styles.heroBadgeText}>Build My Home</Text>
+                <Text style={styles.heroBadgeText}>{goal?.title || 'Build My Home'}</Text>
               </View>
-              <Text style={styles.heroTitle}>Modern Family Bungalow</Text>
-              <Text style={styles.heroSubtitle}>Kira Estate, Kampala • ID: KNZ-2024-08</Text>
+              <Text style={styles.heroTitle}>{goal?.description || 'Modern Family Bungalow'}</Text>
+              <Text style={styles.heroSubtitle}>ID: {goal?.id || 'KNZ-2024-08'}</Text>
             </View>
           </View>
 
           <View style={styles.heroStats}>
             <View style={styles.heroStat}>
-              <Text style={styles.heroStatValue}>$42,500</Text>
+              <Text style={styles.heroStatValue}>{formatUgx(goal?.targetAmountUgx || 0)}</Text>
               <Text style={styles.heroStatLabel}>Total Value</Text>
             </View>
             <View style={styles.heroStatDivider} />
             <View style={styles.heroStat}>
-              <Text style={styles.heroStatValue}>$26,350</Text>
+              <Text style={styles.heroStatValue}>{formatUsdc(goal?.savedAmountUgx || 0, 3700)}</Text>
               <Text style={styles.heroStatLabel}>Released</Text>
             </View>
             <View style={styles.heroStatDivider} />
             <View style={styles.heroStat}>
-              <Text style={styles.heroStatValue}>62%</Text>
+              <Text style={styles.heroStatValue}>{pct}%</Text>
               <Text style={styles.heroStatLabel}>Funded</Text>
             </View>
           </View>
@@ -119,12 +150,12 @@ export default function GoalDetail({ onBack }: { onBack?: () => void }) {
               <View style={styles.overviewCard}>
                 <MaterialCommunityIcons name="calendar-month" size={24} color={Colors.primary} />
                 <Text style={styles.overviewCardLabel}>Started</Text>
-                <Text style={styles.overviewCardValue}>Mar 2024</Text>
+                <Text style={styles.overviewCardValue}>{goal ? new Date(goal.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Mar 2024'}</Text>
               </View>
               <View style={styles.overviewCard}>
                 <MaterialCommunityIcons name="flag-checkered" size={24} color={Colors.secondary} />
                 <Text style={styles.overviewCardLabel}>Target</Text>
-                <Text style={styles.overviewCardValue}>Dec 2025</Text>
+                <Text style={styles.overviewCardValue}>{goal ? new Date(goal.targetDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Dec 2025'}</Text>
               </View>
               <View style={styles.overviewCard}>
                 <MaterialCommunityIcons name="account-group" size={24} color={Colors.tertiary} />
@@ -134,22 +165,21 @@ export default function GoalDetail({ onBack }: { onBack?: () => void }) {
               <View style={[styles.overviewCard, { backgroundColor: Colors.primaryContainer }]}>
                 <MaterialCommunityIcons name="shield-check" size={24} color={Colors.onPrimary} />
                 <Text style={[styles.overviewCardLabel, { color: Colors.onPrimary, opacity: 0.7 }]}>Status</Text>
-                <Text style={[styles.overviewCardValue, { color: Colors.onPrimary }]}>On Track</Text>
+                <Text style={[styles.overviewCardValue, { color: Colors.onPrimary }]}>{goal?.status === 'completed' ? 'Completed' : 'Active'}</Text>
               </View>
             </View>
 
             <View style={styles.progressDetail}>
               <View style={styles.progressDetailHeader}>
-                <Text style={styles.progressDetailTitle}>Construction Progress</Text>
-                <Text style={styles.progressDetailPercent}>45% complete</Text>
+                <Text style={styles.progressDetailTitle}>Goal Progress</Text>
+                <Text style={styles.progressDetailPercent}>{pct}% complete</Text>
               </View>
               <View style={styles.progressDetailBarBg}>
-                <View style={[styles.progressDetailBarFill, { width: '45%' }]} />
+                <View style={[styles.progressDetailBarFill, { width: `${pct}%` }]} />
               </View>
               <View style={styles.progressDetailLabels}>
-                <Text style={styles.progressDetailLabel}>Foundation ✓</Text>
-                <Text style={styles.progressDetailLabel}>Walls in progress</Text>
-                <Text style={[styles.progressDetailLabel, { color: Colors.outline }]}>Roofing</Text>
+                <Text style={styles.progressDetailLabel}>Saved: {formatUgx(goal?.savedAmountUgx || 0)}</Text>
+                <Text style={[styles.progressDetailLabel, { color: Colors.outline }]}>Target: {formatUgx(goal?.targetAmountUgx || 0)}</Text>
               </View>
             </View>
 
@@ -225,13 +255,13 @@ export default function GoalDetail({ onBack }: { onBack?: () => void }) {
 
             <View style={styles.paymentSummary}>
               <View style={styles.paymentSummaryItem}>
-                <Text style={styles.paymentSummaryLabel}>Total Escrow</Text>
-                <Text style={styles.paymentSummaryValue}>$16,150</Text>
+                <Text style={styles.paymentSummaryLabel}>Released</Text>
+                <Text style={styles.paymentSummaryValue}>{formatUsdc(goal?.savedAmountUgx || 16150, 3700)}</Text>
               </View>
               <View style={styles.paymentSummaryDivider} />
               <View style={styles.paymentSummaryItem}>
-                <Text style={styles.paymentSummaryLabel}>Available</Text>
-                <Text style={[styles.paymentSummaryValue, { color: Colors.primary }]}>$42,500</Text>
+                <Text style={styles.paymentSummaryLabel}>Total Budget</Text>
+                <Text style={[styles.paymentSummaryValue, { color: Colors.primary }]}>{formatUsdc(goal?.targetAmountUgx || 42500, 3700)}</Text>
               </View>
             </View>
 

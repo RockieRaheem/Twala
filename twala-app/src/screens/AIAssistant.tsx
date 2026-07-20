@@ -1,7 +1,8 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Image, Animated } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Image, Animated, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
+import { chatApi, type ChatMsg } from '../services/api';
 
 const SUGGESTED_REPLIES = ['Yes, show me breakdown', 'Check exchange rate', 'Update goal target'];
 const QUICK_ACTIONS = [
@@ -51,15 +52,39 @@ const typingStyles = StyleSheet.create({
 export default function AIAssistant() {
   const [message, setMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [loading, setLoading] = useState(true);
   const scrollRef = useRef<ScrollView>(null);
 
-  const handleSend = () => {
+  useEffect(() => {
+    chatApi.list().then((res) => {
+      if (res.success && res.data) setMessages(res.data);
+      setLoading(false);
+    });
+  }, []);
+
+  const handleSend = async () => {
     if (!message.trim()) return;
     setIsTyping(true);
+    const userMsg = message.trim();
     setMessage('');
-    setTimeout(() => {
-      setIsTyping(false);
-    }, 2000);
+    const res = await chatApi.send(userMsg);
+    if (res.success && res.data) setMessages(res.data);
+    setIsTyping(false);
+  };
+
+  const handleQuickAction = async (label: string) => {
+    setIsTyping(true);
+    const res = await chatApi.send(`I want to ${label}`);
+    if (res.success && res.data) setMessages(res.data);
+    setIsTyping(false);
+  };
+
+  const handleSuggested = async (text: string) => {
+    setIsTyping(true);
+    const res = await chatApi.send(text);
+    if (res.success && res.data) setMessages(res.data);
+    setIsTyping(false);
   };
 
   return (
@@ -85,90 +110,79 @@ export default function AIAssistant() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        ref={scrollRef}
-        style={styles.chatArea}
-        contentContainerStyle={styles.chatContent}
-        showsVerticalScrollIndicator={false}
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
-      >
-        <View style={styles.dateMarker}>
-          <MaterialCommunityIcons name="calendar-today" size={12} color={Colors.onSurfaceVariant} />
-          <Text style={styles.dateText}>Today</Text>
-        </View>
-
-        <View style={styles.quickActionRow}>
-          {QUICK_ACTIONS.map((action) => (
-            <TouchableOpacity key={action.label} style={styles.quickActionChip} activeOpacity={0.7}>
-              <MaterialCommunityIcons name={action.icon} size={18} color={Colors.primary} />
-              <Text style={styles.quickActionLabel}>{action.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={styles.userMessage}>
-          <Text style={styles.userMessageText}>
-            How am I doing with my house project savings for Wakiso?
-          </Text>
-          <Text style={styles.messageTime}>10:42 AM</Text>
-        </View>
-
-        <View style={styles.aiRow}>
-          <View style={styles.aiAvatarSmall}>
-            <MaterialCommunityIcons name="robot" size={18} color={Colors.onSecondaryContainer} />
-          </View>
-          <View style={styles.aiBlock}>
-            <View style={styles.aiMessage}>
-              <Text style={styles.aiMessageText}>
-                I see you're planning to build a three-bedroom house in Wakiso. Based on your current savings, we can reach the roofing milestone by October. Would you like to see a breakdown?
-              </Text>
-              <Text style={styles.messageTime}>10:42 AM</Text>
-            </View>
-
-            <View style={styles.dataCard}>
-              <View style={styles.dataCardDecor}>
-                <MaterialCommunityIcons name="home-roof" size={36} color={Colors.primary} />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}>
+        <ScrollView
+          ref={scrollRef}
+          style={styles.chatArea}
+          contentContainerStyle={styles.chatContent}
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+        >
+          {loading ? (
+            <ActivityIndicator color={Colors.primary} style={{ marginTop: 40 }} />
+          ) : (
+            <>
+              <View style={styles.dateMarker}>
+                <MaterialCommunityIcons name="calendar-today" size={12} color={Colors.onSurfaceVariant} />
+                <Text style={styles.dateText}>Today</Text>
               </View>
-              <Text style={styles.dataLabel}>TARGET DATE</Text>
-              <View style={styles.dataValueRow}>
-                <Text style={styles.dataValue}>October 2024</Text>
-                <View style={styles.dataBadge}>
-                  <MaterialCommunityIcons name="check-circle" size={12} color={Colors.onSecondaryContainer} />
-                  <Text style={styles.dataBadgeText}>On Track</Text>
+
+              {messages.length <= 1 && (
+                <View style={styles.quickActionRow}>
+                  {QUICK_ACTIONS.map((action) => (
+                    <TouchableOpacity key={action.label} style={styles.quickActionChip} activeOpacity={0.7} onPress={() => handleQuickAction(action.label)}>
+                      <MaterialCommunityIcons name={action.icon} size={18} color={Colors.primary} />
+                      <Text style={styles.quickActionLabel}>{action.label}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              </View>
-              <View style={styles.dataBarBg}>
-                <View style={[styles.dataBarFill, { width: '65%' }]} />
-              </View>
-              <View style={styles.dataBarLabels}>
-                <Text style={styles.dataBarLabelLeft}>65% funded</Text>
-                <Text style={styles.dataBarLabelRight}>UGX 97.5M / 150M</Text>
-              </View>
-            </View>
+              )}
 
-            <View style={styles.suggestedRow}>
-              {SUGGESTED_REPLIES.map((reply) => (
-                <TouchableOpacity key={reply} style={styles.suggestedChip} activeOpacity={0.7}>
-                  <Text style={styles.chipText}>{reply}</Text>
-                </TouchableOpacity>
+              {messages.map((msg, i) => (
+                msg.role === 'user' ? (
+                  <View key={i} style={styles.userMessage}>
+                    <Text style={styles.userMessageText}>{msg.content}</Text>
+                    <Text style={styles.messageTime}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                  </View>
+                ) : (
+                  <View key={i} style={styles.aiRow}>
+                    <View style={styles.aiAvatarSmall}>
+                      <MaterialCommunityIcons name="robot" size={18} color={Colors.onSecondaryContainer} />
+                    </View>
+                    <View style={styles.aiBlock}>
+                      <View style={styles.aiMessage}>
+                        <Text style={styles.aiMessageText}>{msg.content}</Text>
+                        <Text style={styles.messageTime}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                      </View>
+                      {i === messages.length - 1 && msg.role === 'assistant' && messages.length > 1 && (
+                        <View style={styles.suggestedRow}>
+                          {SUGGESTED_REPLIES.map((reply) => (
+                            <TouchableOpacity key={reply} style={styles.suggestedChip} activeOpacity={0.7} onPress={() => handleSuggested(reply)}>
+                              <Text style={styles.chipText}>{reply}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                )
               ))}
-            </View>
-          </View>
-        </View>
 
-        {isTyping && (
-          <View style={styles.aiRow}>
-            <View style={styles.aiAvatarSmall}>
-              <MaterialCommunityIcons name="robot" size={18} color={Colors.onSecondaryContainer} />
-            </View>
-            <View style={styles.typingBubble}>
-              <TypingDots />
-            </View>
-          </View>
-        )}
-      </ScrollView>
+              {isTyping && (
+                <View style={styles.aiRow}>
+                  <View style={styles.aiAvatarSmall}>
+                    <MaterialCommunityIcons name="robot" size={18} color={Colors.onSecondaryContainer} />
+                  </View>
+                  <View style={styles.typingBubble}>
+                    <TypingDots />
+                  </View>
+                </View>
+              )}
+            </>
+          )}
+        </ScrollView>
 
-      <View style={styles.inputArea}>
+        <View style={styles.inputArea}>
         <View style={styles.inputRow}>
           <TouchableOpacity style={styles.inputIcon}>
             <MaterialCommunityIcons name="plus" size={24} color={Colors.primaryContainer} />
@@ -189,6 +203,7 @@ export default function AIAssistant() {
           </TouchableOpacity>
         </View>
       </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
