@@ -1,61 +1,46 @@
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Image, Dimensions } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useState } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const TABS = ['Overview', 'Milestones', 'Payments'];
 
 const MILESTONES = [
   {
-    title: 'Foundation',
-    status: 'Done',
-    statusColor: Colors.primary,
-    statusBg: Colors.primaryFixed,
-    icon: 'check' as const,
-    iconBg: Colors.primary,
+    title: 'Foundation', status: 'Done', statusColor: Colors.primary, statusBg: Colors.primaryFixed,
+    icon: 'check' as const, iconBg: Colors.primary,
     description: 'Excavation, leveling, and slab casting completed on May 12, 2024.',
-    date: null,
-    progress: null,
+    date: 'May 12, 2024', progress: 100,
   },
   {
-    title: 'Walls & Structural Frame',
-    status: 'In Progress — 45%',
-    statusColor: Colors.secondary,
-    statusBg: 'transparent',
-    icon: null as string | null,
-    iconBg: Colors.secondaryContainer,
-    description: null,
-    date: 'Estimated Aug 20',
-    progress: 45,
+    title: 'Walls & Structural Frame', status: 'In Progress', statusColor: Colors.secondary, statusBg: 'transparent',
+    icon: null, iconBg: Colors.secondaryContainer,
+    description: 'Brickwork, reinforcement, and vertical structures.',
+    date: 'Est. Aug 20', progress: 45,
   },
   {
-    title: 'Roofing & Finishing',
-    status: 'Pending',
-    statusColor: Colors.outline,
-    statusBg: 'transparent',
-    icon: 'timer-sand' as const,
-    iconBg: Colors.surfaceContainerHighest,
+    title: 'Roofing & Finishing', status: 'Pending', statusColor: Colors.outline, statusBg: 'transparent',
+    icon: 'timer-sand' as const, iconBg: Colors.surfaceContainerHighest,
     description: 'Unlock after walls milestone is verified.',
-    date: null,
-    progress: null,
+    date: null, progress: 0,
+  },
+  {
+    title: 'Interior & Handover', status: 'Pending', statusColor: Colors.outline, statusBg: 'transparent',
+    icon: 'door' as const, iconBg: Colors.surfaceContainerHighest,
+    description: 'Electrical, plumbing, painting, and final inspection.',
+    date: null, progress: 0,
   },
 ];
 
 const TRANSACTIONS = [
-  {
-    name: 'Sula Contractors',
-    subtitle: 'Labor Release • 2 days ago',
-    icon: 'hard-hat' as const,
-    amount: '+$1,200.00',
-  },
-  {
-    name: 'Hardware World',
-    subtitle: 'Material Supply • July 28',
-    icon: 'saw-blade' as const,
-    amount: '+$4,550.00',
-  },
+  { name: 'Sula Contractors', subtitle: 'Labor Release • 2 days ago', icon: 'hard-hat' as const, amount: '+$1,200.00', verified: true },
+  { name: 'Hardware World', subtitle: 'Material Supply • Jul 28', icon: 'store' as const, amount: '+$4,550.00', verified: true },
+  { name: 'Architect Fees', subtitle: 'Design Phase • Jun 15', icon: 'draw-pen' as const, amount: '+$800.00', verified: true },
 ];
 
 export default function GoalDetail({ onBack }: { onBack?: () => void }) {
+  const [activeTab, setActiveTab] = useState('Overview');
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -67,9 +52,9 @@ export default function GoalDetail({ onBack }: { onBack?: () => void }) {
         </View>
         <View style={styles.headerRight}>
           <MaterialCommunityIcons name="bell-outline" size={24} color={Colors.onSurfaceVariant} />
-          <View style={styles.headerAvatar}>
-            <Text style={styles.headerAvatarText}>JD</Text>
-          </View>
+          <TouchableOpacity style={styles.headerAction}>
+            <MaterialCommunityIcons name="dots-vertical" size={24} color={Colors.onSurfaceVariant} />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -82,51 +67,116 @@ export default function GoalDetail({ onBack }: { onBack?: () => void }) {
             />
             <View style={styles.heroOverlay}>
               <View style={styles.heroBadge}>
+                <MaterialCommunityIcons name="home" size={14} color={Colors.onSecondaryContainer} />
                 <Text style={styles.heroBadgeText}>Build My Home</Text>
               </View>
-              <Text style={styles.heroTitle}>Modern Family Bungalow — Kira Estate</Text>
-              <Text style={styles.heroSubtitle}>Kira, Kampala • Project ID: KNZ-2024-08</Text>
+              <Text style={styles.heroTitle}>Modern Family Bungalow</Text>
+              <Text style={styles.heroSubtitle}>Kira Estate, Kampala • ID: KNZ-2024-08</Text>
             </View>
           </View>
 
-          <View style={styles.statsRow}>
-            <View style={styles.statsCard}>
-              <Text style={styles.statsCardLabel}>Total Project Value</Text>
-              <Text style={styles.statsCardValue}>$42,500</Text>
-              <View style={styles.statsBarBg}>
-                <View style={[styles.statsBarFill, { width: '62%' }]} />
-              </View>
-              <View style={styles.statsBarLabels}>
-                <Text style={styles.statsBarLeft}>62% Funded</Text>
-                <Text style={styles.statsBarRight}>$26,350 released</Text>
-              </View>
+          <View style={styles.heroStats}>
+            <View style={styles.heroStat}>
+              <Text style={styles.heroStatValue}>$42,500</Text>
+              <Text style={styles.heroStatLabel}>Total Value</Text>
             </View>
-            <View style={styles.verifiedCard}>
-              <View style={styles.verifiedRow}>
-                <MaterialCommunityIcons
-                  name="check-decagram"
-                  size={20}
-                  color={Colors.secondaryFixedDim}
-                />
-                <Text style={styles.verifiedTitle}>Verified Assets</Text>
-              </View>
-              <Text style={styles.verifiedDesc}>
-                Land title and building permits have been authenticated by Kanzu Legal Services.
-              </Text>
+            <View style={styles.heroStatDivider} />
+            <View style={styles.heroStat}>
+              <Text style={styles.heroStatValue}>$26,350</Text>
+              <Text style={styles.heroStatLabel}>Released</Text>
+            </View>
+            <View style={styles.heroStatDivider} />
+            <View style={styles.heroStat}>
+              <Text style={styles.heroStatValue}>62%</Text>
+              <Text style={styles.heroStatLabel}>Funded</Text>
             </View>
           </View>
         </View>
 
-        <View style={styles.sectionRow}>
-          <View style={styles.milestonesSection}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Milestone Tracker</Text>
-              <TouchableOpacity style={styles.viewDocsButton}>
-                <Text style={styles.viewDocsText}>View Docs</Text>
-                <MaterialCommunityIcons name="open-in-new" size={14} color={Colors.primary} />
-              </TouchableOpacity>
+        <View style={styles.tabRow}>
+          {TABS.map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              style={[styles.tab, activeTab === tab && styles.tabActive]}
+              onPress={() => setActiveTab(tab)}
+            >
+              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {activeTab === 'Overview' && (
+          <View style={styles.tabContent}>
+            <View style={styles.verifiedBanner}>
+              <MaterialCommunityIcons name="check-decagram" size={20} color={Colors.secondaryFixedDim} />
+              <View style={styles.verifiedTextWrap}>
+                <Text style={styles.verifiedTitle}>Verified Assets</Text>
+                <Text style={styles.verifiedDesc}>Land title & building permits authenticated by Kanzu Legal Services.</Text>
+              </View>
             </View>
 
+            <View style={styles.overviewGrid}>
+              <View style={styles.overviewCard}>
+                <MaterialCommunityIcons name="calendar-month" size={24} color={Colors.primary} />
+                <Text style={styles.overviewCardLabel}>Started</Text>
+                <Text style={styles.overviewCardValue}>Mar 2024</Text>
+              </View>
+              <View style={styles.overviewCard}>
+                <MaterialCommunityIcons name="flag-checkered" size={24} color={Colors.secondary} />
+                <Text style={styles.overviewCardLabel}>Target</Text>
+                <Text style={styles.overviewCardValue}>Dec 2025</Text>
+              </View>
+              <View style={styles.overviewCard}>
+                <MaterialCommunityIcons name="account-group" size={24} color={Colors.tertiary} />
+                <Text style={styles.overviewCardLabel}>Contractors</Text>
+                <Text style={styles.overviewCardValue}>3 active</Text>
+              </View>
+              <View style={[styles.overviewCard, { backgroundColor: Colors.primaryContainer }]}>
+                <MaterialCommunityIcons name="shield-check" size={24} color={Colors.onPrimary} />
+                <Text style={[styles.overviewCardLabel, { color: Colors.onPrimary, opacity: 0.7 }]}>Status</Text>
+                <Text style={[styles.overviewCardValue, { color: Colors.onPrimary }]}>On Track</Text>
+              </View>
+            </View>
+
+            <View style={styles.progressDetail}>
+              <View style={styles.progressDetailHeader}>
+                <Text style={styles.progressDetailTitle}>Construction Progress</Text>
+                <Text style={styles.progressDetailPercent}>45% complete</Text>
+              </View>
+              <View style={styles.progressDetailBarBg}>
+                <View style={[styles.progressDetailBarFill, { width: '45%' }]} />
+              </View>
+              <View style={styles.progressDetailLabels}>
+                <Text style={styles.progressDetailLabel}>Foundation ✓</Text>
+                <Text style={styles.progressDetailLabel}>Walls in progress</Text>
+                <Text style={[styles.progressDetailLabel, { color: Colors.outline }]}>Roofing</Text>
+              </View>
+            </View>
+
+            <View style={styles.photoPreview}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionTitle}>Site Photos</Text>
+                <TouchableOpacity>
+                  <Text style={styles.seeAllText}>View all</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoList}>
+                {[1, 2, 3, 4].map((i) => (
+                  <View key={i} style={styles.photoCard}>
+                    <View style={styles.photoPlaceholder}>
+                      <MaterialCommunityIcons name="image" size={32} color={Colors.outline} />
+                    </View>
+                    <Text style={styles.photoLabel}>Site progress #{i}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        )}
+
+        {activeTab === 'Milestones' && (
+          <View style={styles.tabContent}>
+            <Text style={styles.sectionTitle}>Milestone Tracker</Text>
             {MILESTONES.map((ms, index) => (
               <View key={index} style={styles.milestoneItem}>
                 <View style={styles.milestoneLine} />
@@ -134,60 +184,71 @@ export default function GoalDetail({ onBack }: { onBack?: () => void }) {
                   {ms.icon ? (
                     <MaterialCommunityIcons name={ms.icon as any} size={14} color={Colors.onPrimary} />
                   ) : (
-                    <View style={styles.milestonePulse} />
+                    <View style={[styles.milestoneProgressDot, { backgroundColor: ms.progress > 0 ? Colors.secondaryContainer : Colors.outline }]} />
                   )}
                 </View>
                 <View style={styles.milestoneContent}>
                   <View style={styles.milestoneTop}>
-                    <Text style={styles.milestoneTitle}>{ms.title}</Text>
-                    <View style={[styles.milestoneStatus, { backgroundColor: ms.statusBg }]}>
-                      <Text style={[styles.milestoneStatusText, { color: ms.statusColor }]}>
-                        {ms.status}
-                      </Text>
+                    <Text style={[styles.milestoneTitle, ms.progress === 0 && ms.status === 'Pending' && { color: Colors.outline }]}>{ms.title}</Text>
+                    <View style={[styles.milestoneStatus, { backgroundColor: ms.status === 'Done' ? Colors.primaryFixed + '99' : ms.progress > 0 ? Colors.secondaryContainer + '66' : Colors.surfaceContainerHighest }]}>
+                      <Text style={[styles.milestoneStatusText, { color: ms.statusColor }]}>{ms.status}</Text>
                     </View>
                   </View>
-                  {ms.description && (
-                    <Text style={styles.milestoneDesc}>{ms.description}</Text>
+                  <Text style={[styles.milestoneDesc, ms.progress === 0 && ms.status === 'Pending' && { opacity: 0.5 }]}>{ms.description}</Text>
+                  {ms.date && (
+                    <View style={styles.milestoneDateRow}>
+                      <MaterialCommunityIcons name="calendar" size={12} color={Colors.outline} />
+                      <Text style={styles.milestoneDate}>{ms.date}</Text>
+                    </View>
                   )}
-                  {ms.progress !== null && (
+                  {ms.progress > 0 && (
                     <View style={styles.milestoneProgressRow}>
                       <View style={styles.milestoneProgressBg}>
                         <View style={[styles.milestoneProgressFill, { width: `${ms.progress}%` }]} />
                       </View>
-                      <Text style={styles.milestoneProgressDate}>{ms.date}</Text>
+                      <Text style={styles.milestoneProgressLabel}>{ms.progress}%</Text>
                     </View>
                   )}
                 </View>
               </View>
             ))}
           </View>
+        )}
 
-          <View style={styles.paymentsSection}>
+        {activeTab === 'Payments' && (
+          <View style={styles.tabContent}>
             <View style={styles.paymentsHeader}>
-              <MaterialCommunityIcons
-                name="bank-transfer"
-                size={20}
-                color={Colors.secondary}
-              />
-              <Text style={styles.paymentsTitle}>Trusted Payments</Text>
+              <MaterialCommunityIcons name="bank-transfer" size={20} color={Colors.secondary} />
+              <Text style={styles.sectionTitle}>Trusted Payments</Text>
             </View>
-            <Text style={styles.paymentsDesc}>
-              Funds are held in escrow and released only upon milestone verification.
-            </Text>
+            <Text style={styles.paymentsDesc}>Funds held in escrow — released only upon milestone verification.</Text>
+
+            <View style={styles.paymentSummary}>
+              <View style={styles.paymentSummaryItem}>
+                <Text style={styles.paymentSummaryLabel}>Total Escrow</Text>
+                <Text style={styles.paymentSummaryValue}>$16,150</Text>
+              </View>
+              <View style={styles.paymentSummaryDivider} />
+              <View style={styles.paymentSummaryItem}>
+                <Text style={styles.paymentSummaryLabel}>Available</Text>
+                <Text style={[styles.paymentSummaryValue, { color: Colors.primary }]}>$42,500</Text>
+              </View>
+            </View>
 
             {TRANSACTIONS.map((tx, index) => (
               <View key={index} style={styles.txItem}>
                 <View style={styles.txIcon}>
-                  <MaterialCommunityIcons name={tx.icon} size={20} color={Colors.primary} />
+                  <MaterialCommunityIcons name={tx.icon as any} size={20} color={Colors.primary} />
                 </View>
                 <View style={styles.txInfo}>
                   <Text style={styles.txName}>{tx.name}</Text>
                   <Text style={styles.txSubtitle}>{tx.subtitle}</Text>
                 </View>
-                <View style={styles.txAmount}>
-                  <Text style={styles.txAmountText}>{tx.amount}</Text>
-                  <View style={styles.txStatus}>
-                    <Text style={styles.txStatusText}>Released</Text>
+                <View style={styles.txAmountCol}>
+                  <Text style={styles.txAmount}>{tx.amount}</Text>
+                  <View style={styles.txVerified}>
+                    <MaterialCommunityIcons name="check-decagram" size={12} color={Colors.primary} />
+                    <Text style={styles.txVerifiedText}>Verified</Text>
                   </View>
                 </View>
               </View>
@@ -198,410 +259,100 @@ export default function GoalDetail({ onBack }: { onBack?: () => void }) {
               <Text style={styles.sendPaymentText}>Send Progress Payment</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        )}
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.containerPaddingMobile,
-    paddingVertical: Spacing.stackMd,
-    backgroundColor: Colors.surface,
-    ...Shadow.level1,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.stackSm,
-  },
-  backButton: {
-    padding: 8,
-    borderRadius: BorderRadius.full,
-  },
-  headerTitle: {
-    fontSize: Typography.headlineMd.fontSize,
-    fontFamily: 'Montserrat',
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.stackMd,
-  },
-  headerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.primaryFixed,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerAvatarText: {
-    fontWeight: '700',
-    color: Colors.onPrimaryFixed,
-  },
-  scrollContent: {
-    paddingBottom: 100,
-  },
-  heroSection: {
-    paddingHorizontal: Spacing.containerPaddingMobile,
-    paddingTop: Spacing.stackLg,
-  },
-  heroImage: {
-    height: 300,
-    borderRadius: BorderRadius.xl,
-    overflow: 'hidden',
-    ...Shadow.level2,
-  },
-  heroImageContent: {
-    width: '100%',
-    height: '100%',
-  },
-  heroOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: Spacing.stackLg,
-    backgroundColor: 'rgba(0,67,54,0.6)',
-  },
-  heroBadge: {
-    backgroundColor: Colors.secondaryContainer,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.full,
-    alignSelf: 'flex-start',
-    marginBottom: 8,
-  },
-  heroBadgeText: {
-    fontSize: Typography.labelSm.fontSize,
-    fontFamily: 'Inter',
-    fontWeight: '500',
-    color: Colors.onSecondaryContainer,
-  },
-  heroTitle: {
-    fontSize: Typography.headlineSm.fontSize,
-    fontFamily: 'Montserrat',
-    fontWeight: '600',
-    color: Colors.onPrimary,
-    marginBottom: 4,
-  },
-  heroSubtitle: {
-    fontSize: Typography.bodySm.fontSize,
-    fontFamily: 'Inter',
-    color: Colors.onPrimary,
-    opacity: 0.8,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: Spacing.gutter,
-    marginTop: Spacing.gutter,
-  },
-  statsCard: {
-    flex: 2,
-    backgroundColor: Colors.surfaceContainerLowest,
-    padding: Spacing.stackMd,
-    borderRadius: BorderRadius.xl,
-    borderWidth: 1,
-    borderColor: Colors.surfaceContainerHighest + '80',
-    ...Shadow.level1,
-  },
-  statsCardLabel: {
-    fontSize: Typography.labelSm.fontSize,
-    fontFamily: 'Inter',
-    fontWeight: '500',
-    color: Colors.onSurfaceVariant,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  statsCardValue: {
-    fontSize: Typography.displayLgMobile.fontSize,
-    fontFamily: 'Montserrat',
-    fontWeight: '700',
-    color: Colors.primary,
-    marginBottom: Spacing.stackMd,
-  },
-  statsBarBg: {
-    width: '100%',
-    height: 8,
-    backgroundColor: Colors.surfaceContainer,
-    borderRadius: BorderRadius.full,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  statsBarFill: {
-    height: '100%',
-    backgroundColor: Colors.secondaryContainer,
-    borderRadius: BorderRadius.full,
-  },
-  statsBarLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  statsBarLeft: {
-    fontSize: Typography.labelSm.fontSize,
-    fontFamily: 'Inter',
-    fontWeight: '500',
-    color: Colors.onSurfaceVariant,
-  },
-  statsBarRight: {
-    fontSize: Typography.labelSm.fontSize,
-    fontFamily: 'Inter',
-    fontWeight: '700',
-    color: Colors.secondary,
-  },
-  verifiedCard: {
-    flex: 1,
-    backgroundColor: Colors.primaryContainer,
-    padding: Spacing.stackMd,
-    borderRadius: BorderRadius.xl,
-    ...Shadow.level1,
-  },
-  verifiedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.stackSm,
-    marginBottom: 8,
-  },
-  verifiedTitle: {
-    fontSize: Typography.labelMd.fontSize,
-    fontFamily: 'Inter',
-    fontWeight: '600',
-    color: Colors.onPrimary,
-  },
-  verifiedDesc: {
-    fontSize: Typography.bodySm.fontSize,
-    fontFamily: 'Inter',
-    color: Colors.primaryFixedDim,
-  },
-  sectionRow: {
-    flexDirection: 'column',
-    gap: Spacing.gutter,
-    paddingHorizontal: Spacing.containerPaddingMobile,
-    marginTop: Spacing.gutter,
-  },
-  milestonesSection: {
-    backgroundColor: Colors.surfaceContainerLowest,
-    padding: Spacing.stackLg,
-    borderRadius: BorderRadius.xl,
-    borderWidth: 1,
-    borderColor: Colors.surfaceContainerHighest + '80',
-    ...Shadow.level1,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.stackLg,
-  },
-  sectionTitle: {
-    fontSize: Typography.headlineSm.fontSize,
-    fontFamily: 'Montserrat',
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  viewDocsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  viewDocsText: {
-    fontSize: Typography.labelMd.fontSize,
-    fontFamily: 'Inter',
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  milestoneItem: {
-    flexDirection: 'row',
-    gap: Spacing.stackMd,
-    position: 'relative',
-    marginBottom: Spacing.stackLg,
-  },
-  milestoneLine: {
-    position: 'absolute',
-    left: 11,
-    top: 24,
-    bottom: -8,
-    width: 2,
-    backgroundColor: Colors.outlineVariant,
-  },
-  milestoneDot: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1,
-    flexShrink: 0,
-  },
-  milestonePulse: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.onSecondaryContainer,
-  },
-  milestoneContent: {
-    flex: 1,
-    paddingBottom: Spacing.stackMd,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.outlineVariant + '33',
-  },
-  milestoneTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 4,
-  },
-  milestoneTitle: {
-    fontSize: Typography.labelMd.fontSize,
-    fontFamily: 'Inter',
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  milestoneStatus: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  milestoneStatusText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  milestoneDesc: {
-    fontSize: Typography.bodySm.fontSize,
-    fontFamily: 'Inter',
-    color: Colors.onSurfaceVariant,
-  },
-  milestoneProgressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.stackSm,
-    marginTop: 8,
-  },
-  milestoneProgressBg: {
-    flex: 1,
-    height: 6,
-    backgroundColor: Colors.surfaceContainer,
-    borderRadius: BorderRadius.full,
-    overflow: 'hidden',
-  },
-  milestoneProgressFill: {
-    height: '100%',
-    backgroundColor: Colors.secondaryContainer,
-    borderRadius: BorderRadius.full,
-  },
-  milestoneProgressDate: {
-    fontSize: Typography.labelSm.fontSize,
-    fontFamily: 'Inter',
-    fontWeight: '500',
-    color: Colors.onSurfaceVariant,
-  },
-  paymentsSection: {
-    backgroundColor: Colors.surfaceContainerLowest,
-    padding: Spacing.stackLg,
-    borderRadius: BorderRadius.xl,
-    borderWidth: 1,
-    borderColor: Colors.surfaceContainerHighest + '80',
-    ...Shadow.level1,
-  },
-  paymentsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  paymentsTitle: {
-    fontSize: Typography.headlineSm.fontSize,
-    fontFamily: 'Montserrat',
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  paymentsDesc: {
-    fontSize: Typography.bodySm.fontSize,
-    fontFamily: 'Inter',
-    color: Colors.onSurfaceVariant,
-    marginBottom: Spacing.stackLg,
-  },
-  txItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.stackSm,
-    borderRadius: BorderRadius.md,
-    marginBottom: 8,
-  },
-  txIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.surfaceContainer,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  txInfo: {
-    flex: 1,
-    marginLeft: Spacing.stackMd,
-  },
-  txName: {
-    fontSize: Typography.labelMd.fontSize,
-    fontFamily: 'Inter',
-    fontWeight: '600',
-    color: Colors.onSurface,
-  },
-  txSubtitle: {
-    fontSize: 12,
-    fontFamily: 'Inter',
-    color: Colors.outline,
-  },
-  txAmount: {
-    alignItems: 'flex-end',
-  },
-  txAmountText: {
-    fontSize: Typography.labelMd.fontSize,
-    fontFamily: 'Inter',
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  txStatus: {
-    backgroundColor: Colors.primaryFixed + '4D',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginTop: 2,
-  },
-  txStatusText: {
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    color: Colors.primary,
-  },
-  sendPaymentButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: Colors.primary,
-    paddingVertical: Spacing.stackMd,
-    borderRadius: BorderRadius.xl,
-    marginTop: Spacing.gutter,
-    ...Shadow.level1,
-  },
-  sendPaymentText: {
-    fontSize: Typography.labelMd.fontSize,
-    fontFamily: 'Inter',
-    fontWeight: '600',
-    color: Colors.onPrimary,
-  },
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: Spacing.containerPaddingMobile, paddingVertical: Spacing.stackSm,
+    backgroundColor: Colors.surface, ...Shadow.level1,
+  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm },
+  backButton: { padding: 8, borderRadius: BorderRadius.full },
+  headerTitle: { fontSize: Typography.headlineMd.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm },
+  headerAction: { padding: 8, borderRadius: BorderRadius.full },
+  scrollContent: { paddingBottom: 100 },
+  heroSection: { paddingHorizontal: Spacing.containerPaddingMobile, paddingTop: Spacing.gutter },
+  heroImage: { height: 260, borderRadius: BorderRadius.xl, overflow: 'hidden', ...Shadow.level2 },
+  heroImageContent: { width: '100%', height: '100%' },
+  heroOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: Spacing.stackLg, backgroundColor: 'rgba(0,67,54,0.55)' },
+  heroBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.secondaryContainer, paddingHorizontal: 12, paddingVertical: 4, borderRadius: BorderRadius.full, alignSelf: 'flex-start', marginBottom: 8 },
+  heroBadgeText: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSecondaryContainer },
+  heroTitle: { fontSize: Typography.headlineSm.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.onPrimary, marginBottom: 2 },
+  heroSubtitle: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onPrimary, opacity: 0.8 },
+  heroStats: { flexDirection: 'row', backgroundColor: Colors.surfaceContainerLowest, marginTop: Spacing.stackMd, borderRadius: BorderRadius.xl, padding: Spacing.stackMd, ...Shadow.level1, borderWidth: 1, borderColor: Colors.outlineVariant + '33' },
+  heroStat: { flex: 1, alignItems: 'center' },
+  heroStatDivider: { width: 1, backgroundColor: Colors.outlineVariant + '4D', marginVertical: 4 },
+  heroStatValue: { fontSize: Typography.headlineSm.fontSize, fontFamily: 'Montserrat', fontWeight: '700', color: Colors.primary },
+  heroStatLabel: { fontSize: 11, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurfaceVariant, marginTop: 2 },
+  tabRow: { flexDirection: 'row', gap: 4, paddingHorizontal: Spacing.containerPaddingMobile, marginTop: Spacing.gutter, backgroundColor: Colors.surfaceContainerLow, marginHorizontal: Spacing.containerPaddingMobile, borderRadius: BorderRadius.lg, padding: 4 },
+  tab: { flex: 1, paddingVertical: 10, borderRadius: BorderRadius.md, alignItems: 'center' },
+  tabActive: { backgroundColor: Colors.surfaceContainerLowest, ...Shadow.level1 },
+  tabText: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurfaceVariant },
+  tabTextActive: { color: Colors.primary, fontWeight: '600' },
+  tabContent: { paddingHorizontal: Spacing.containerPaddingMobile, marginTop: Spacing.gutter, gap: Spacing.stackMd },
+  verifiedBanner: { flexDirection: 'row', gap: Spacing.stackMd, alignItems: 'center', backgroundColor: Colors.primaryContainer, padding: Spacing.stackMd, borderRadius: BorderRadius.xl },
+  verifiedTextWrap: { flex: 1 },
+  verifiedTitle: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onPrimary },
+  verifiedDesc: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.primaryFixedDim, marginTop: 2 },
+  overviewGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.stackSm },
+  overviewCard: { width: '48%', backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: Colors.outlineVariant + '33', ...Shadow.level1, gap: 4 },
+  overviewCardLabel: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurfaceVariant },
+  overviewCardValue: { fontSize: Typography.headlineSm.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
+  progressDetail: { backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: Colors.outlineVariant + '33', ...Shadow.level1 },
+  progressDetailHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.stackSm },
+  progressDetailTitle: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurface },
+  progressDetailPercent: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.secondary },
+  progressDetailBarBg: { width: '100%', height: 10, backgroundColor: Colors.surfaceContainerHigh, borderRadius: BorderRadius.full, overflow: 'hidden' },
+  progressDetailBarFill: { height: '100%', backgroundColor: Colors.secondaryContainer, borderRadius: BorderRadius.full },
+  progressDetailLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  progressDetailLabel: { fontSize: 10, fontFamily: 'Inter', fontWeight: '500', color: Colors.primary },
+  photoPreview: {},
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.stackSm },
+  sectionTitle: { fontSize: Typography.headlineSm.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
+  seeAllText: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.secondary },
+  photoList: { flexDirection: 'row', gap: Spacing.stackSm, paddingRight: Spacing.containerPaddingMobile },
+  photoCard: { alignItems: 'center', gap: 6 },
+  photoPlaceholder: { width: 100, height: 100, borderRadius: BorderRadius.lg, backgroundColor: Colors.surfaceContainerHigh, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: Colors.outlineVariant + '33' },
+  photoLabel: { fontSize: 10, fontFamily: 'Inter', color: Colors.onSurfaceVariant },
+  milestoneItem: { flexDirection: 'row', gap: Spacing.stackMd, position: 'relative', marginBottom: Spacing.stackLg },
+  milestoneLine: { position: 'absolute', left: 11, top: 24, bottom: -8, width: 2, backgroundColor: Colors.outlineVariant },
+  milestoneDot: { width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center', zIndex: 1, flexShrink: 0 },
+  milestoneProgressDot: { width: 8, height: 8, borderRadius: 4 },
+  milestoneContent: { flex: 1, paddingBottom: Spacing.stackMd, borderBottomWidth: 1, borderBottomColor: Colors.outlineVariant + '33' },
+  milestoneTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 },
+  milestoneTitle: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.primary },
+  milestoneStatus: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: BorderRadius.full },
+  milestoneStatusText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
+  milestoneDesc: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onSurfaceVariant, marginBottom: 6 },
+  milestoneDateRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
+  milestoneDate: { fontSize: 11, fontFamily: 'Inter', color: Colors.outline },
+  milestoneProgressRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm },
+  milestoneProgressBg: { flex: 1, height: 6, backgroundColor: Colors.surfaceContainer, borderRadius: BorderRadius.full, overflow: 'hidden' },
+  milestoneProgressFill: { height: '100%', backgroundColor: Colors.secondaryContainer, borderRadius: BorderRadius.full },
+  milestoneProgressLabel: { fontSize: 11, fontFamily: 'Inter', fontWeight: '600', color: Colors.secondary },
+  paymentsHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  paymentsDesc: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onSurfaceVariant, marginTop: -8 },
+  paymentSummary: { flexDirection: 'row', backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: Colors.outlineVariant + '33', ...Shadow.level1 },
+  paymentSummaryItem: { flex: 1, alignItems: 'center' },
+  paymentSummaryDivider: { width: 1, backgroundColor: Colors.outlineVariant + '4D', marginVertical: 4 },
+  paymentSummaryLabel: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurfaceVariant },
+  paymentSummaryValue: { fontSize: Typography.headlineSm.fontSize, fontFamily: 'Montserrat', fontWeight: '700', color: Colors.secondary, marginTop: 2 },
+  txItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.stackSm },
+  txIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.surfaceContainer, justifyContent: 'center', alignItems: 'center' },
+  txInfo: { flex: 1, marginLeft: Spacing.stackMd },
+  txName: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurface },
+  txSubtitle: { fontSize: 12, fontFamily: 'Inter', color: Colors.outline, marginTop: 1 },
+  txAmountCol: { alignItems: 'flex-end' },
+  txAmount: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.primary },
+  txVerified: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
+  txVerifiedText: { fontSize: 10, fontFamily: 'Inter', fontWeight: '500', color: Colors.primary },
+  sendPaymentButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Colors.primary, paddingVertical: Spacing.stackMd, borderRadius: BorderRadius.xl, ...Shadow.level1, marginTop: Spacing.stackSm },
+  sendPaymentText: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onPrimary },
 });
