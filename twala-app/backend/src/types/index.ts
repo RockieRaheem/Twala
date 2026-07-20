@@ -18,6 +18,7 @@ export interface Transaction {
   purpose: string;
   stellarTxHash?: string;
   kotaniReferenceId?: string;
+  kotaniStatus?: string;
   createdAt: string;
 }
 

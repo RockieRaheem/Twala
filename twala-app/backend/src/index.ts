@@ -7,6 +7,7 @@ import goalsRouter from './routes/goals.js';
 import historyRouter from './routes/history.js';
 import chatRouter from './routes/chat.js';
 import ratesRouter from './routes/rates.js';
+import kotaniRouter from './routes/kotani.js';
 import { store } from './store.js';
 import * as stellar from './services/stellar.js';
 import { getExchangeRate } from './services/rates.js';
@@ -37,6 +38,7 @@ app.use('/api/goals', goalsRouter);
 app.use('/api/history', historyRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/rates', ratesRouter);
+app.use('/api/kotani', kotaniRouter);
 
 app.listen(config.port, '0.0.0.0', () => {
   console.log(`\n  🏦 Twala Backend running`);

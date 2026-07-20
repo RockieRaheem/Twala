@@ -1,8 +1,10 @@
-import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Animated, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Animated, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRef, useEffect, useState } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 import { transferApi, ratesApi } from '../services/api';
+
+type TransferMode = 'send' | 'deposit';
 
 const PURPOSES = [
   { label: 'Family Support', value: 'family', icon: 'face-woman-profile' as const, desc: 'Send to parents or spouse' },
@@ -12,15 +14,25 @@ const PURPOSES = [
   { label: 'Business Investment', value: 'business', icon: 'briefcase' as const, desc: 'Invoice or partnership payment' },
 ];
 
-const PATH_NODES = [
-  { label: 'Your Bank', icon: 'bank' as const, color: 'rgba(255,255,255,0.2)' },
-  { label: 'USDC', icon: 'circle-multiple' as const, color: Colors.secondaryContainer },
-  { label: 'Kotani', icon: 'lan' as const, color: 'rgba(255,255,255,0.2)' },
+const NETWORKS = ['MTN', 'AIRTEL'];
+
+const PATH_NODES_SEND = [
+  { label: 'Your Wallet', icon: 'wallet' as const, color: 'rgba(255,255,255,0.2)' },
+  { label: 'Stellar', icon: 'circle-multiple' as const, color: Colors.secondaryContainer },
+  { label: 'Kotani Pay', icon: 'lan' as const, color: 'rgba(255,255,255,0.2)' },
   { label: 'M-Money', icon: 'cellphone' as const, color: Colors.surfaceContainerLowest },
 ];
 
-function StellarPath() {
+const PATH_NODES_DEPOSIT = [
+  { label: 'M-Money', icon: 'cellphone' as const, color: 'rgba(255,255,255,0.2)' },
+  { label: 'Kotani Pay', icon: 'lan' as const, color: 'rgba(255,255,255,0.2)' },
+  { label: 'Stellar', icon: 'circle-multiple' as const, color: Colors.secondaryContainer },
+  { label: 'Your Wallet', icon: 'wallet' as const, color: Colors.surfaceContainerLowest },
+];
+
+function StellarPath({ mode }: { mode: TransferMode }) {
   const pulseAnim = useRef(new Animated.Value(0)).current;
+  const nodes = mode === 'send' ? PATH_NODES_SEND : PATH_NODES_DEPOSIT;
 
   useEffect(() => {
     const anim = Animated.loop(
@@ -31,21 +43,27 @@ function StellarPath() {
     );
     anim.start();
     return () => anim.stop();
-  }, []);
+  }, [mode]);
 
   return (
     <View style={stellarStyles.card}>
       <View style={stellarStyles.decorBg} />
       <View style={stellarStyles.pathRow}>
-        {PATH_NODES.map((node, i) => (
+        {nodes.map((node, i) => (
           <View key={node.label}>
             <View style={stellarStyles.nodeCol}>
               <View style={[stellarStyles.nodeIcon, { backgroundColor: node.color }]}>
-                <MaterialCommunityIcons name={node.icon} size={22} color={node.label === 'USDC' ? Colors.onSecondaryContainer : Colors.onPrimary} />
+                <MaterialCommunityIcons
+                  name={node.icon}
+                  size={22}
+                  color={node.label === 'Stellar' ? Colors.onSecondaryContainer : Colors.onPrimary}
+                />
               </View>
-              <Text style={[stellarStyles.nodeLabel, node.label === 'USDC' && { color: Colors.secondaryFixed }]}>{node.label}</Text>
+              <Text style={[stellarStyles.nodeLabel, node.label === 'Stellar' && { color: Colors.secondaryFixed }]}>
+                {node.label}
+              </Text>
             </View>
-            {i < PATH_NODES.length - 1 && (
+            {i < nodes.length - 1 && (
               <View style={stellarStyles.connectorWrap}>
                 <View style={stellarStyles.connectorBase}>
                   <Animated.View style={[stellarStyles.connectorPulse, { opacity: pulseAnim }]} />
@@ -55,14 +73,11 @@ function StellarPath() {
           </View>
         ))}
       </View>
-      <View style={stellarStyles.connectorRow}>
-        {PATH_NODES.slice(0, -1).map((_, i) => (
-          <View key={i} style={stellarStyles.connectorH}>
-            <Animated.View style={[stellarStyles.connectorHFill, { opacity: pulseAnim }]} />
-          </View>
-        ))}
-      </View>
-      <Text style={stellarStyles.footer}>Ironclad security powered by Stellar blockchain rails.</Text>
+      <Text style={stellarStyles.footer}>
+        {mode === 'send'
+          ? 'Your USDC → Stellar (3-5s) → Kotani Pay → MTN/Airtel Mobile Money (1-2 min)'
+          : 'MTN/Airtel Mobile Money → Kotani Pay → Stellar (3-5s) → Your USDC Wallet'}
+      </Text>
     </View>
   );
 }
@@ -77,16 +92,17 @@ const stellarStyles = StyleSheet.create({
   connectorWrap: { position: 'absolute', top: 22, left: 52, right: -20, height: 4, zIndex: 0 },
   connectorBase: { height: 2, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 1, overflow: 'hidden' },
   connectorPulse: { height: '100%', backgroundColor: Colors.secondaryContainer, borderRadius: 1 },
-  connectorRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 30, marginTop: -12, marginBottom: 8 },
-  connectorH: { height: 2, flex: 1, marginHorizontal: -8, backgroundColor: 'rgba(255,255,255,0.1)', overflow: 'hidden', borderRadius: 1 },
-  connectorHFill: { height: '100%', backgroundColor: Colors.secondaryContainer, borderRadius: 1 },
   footer: { marginTop: Spacing.gutter, textAlign: 'center', fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.primaryFixed },
 });
 
 export default function SmartTransfer() {
+  const [mode, setMode] = useState<TransferMode>('send');
   const [selectedPurpose, setSelectedPurpose] = useState(PURPOSES[1]);
   const [showPicker, setShowPicker] = useState(false);
   const [amount, setAmount] = useState('500');
+  const [recipientName, setRecipientName] = useState('');
+  const [recipientPhone, setRecipientPhone] = useState('');
+  const [recipientNetwork, setRecipientNetwork] = useState<'MTN' | 'AIRTEL'>('MTN');
   const [liveRate, setLiveRate] = useState(3750);
   const [quote, setQuote] = useState<{ sendAmountUsdc: number; receiveAmountUgx: number; feeUsdc: number; feeUgx: number; rate: number; estimatedArrival: string } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -102,6 +118,7 @@ export default function SmartTransfer() {
   }, []);
 
   useEffect(() => {
+    if (mode === 'deposit') { setQuote(null); return; }
     if (usdAmount < 10) { setQuote(null); return; }
     setLoading(true);
     const timer = setTimeout(() => {
@@ -111,7 +128,7 @@ export default function SmartTransfer() {
       });
     }, 300);
     return () => clearTimeout(timer);
-  }, [usdAmount]);
+  }, [usdAmount, mode]);
 
   useEffect(() => {
     Animated.sequence([
@@ -120,22 +137,47 @@ export default function SmartTransfer() {
     ]).start();
   }, [amount]);
 
-  const handleReview = async () => {
-    if (usdAmount < 10) return Alert.alert('Minimum 10 USDC', 'Please enter at least 10 USDC to send.');
-    if (!quote) return Alert.alert('No quote', 'Unable to get exchange rate. Try again.');
-    setSubmitting(true);
-    const res = await transferApi.submit({
-      amountUsdc: usdAmount,
-      recipientName: selectedPurpose.label,
-      purpose: selectedPurpose.label,
-    });
-    setSubmitting(false);
-    if (res.success) {
-      Alert.alert('Transfer Submitted!', res.data?.message || 'Your transfer is being processed.');
-      setAmount('500');
-      setQuote(null);
+  const handleSubmit = async () => {
+    if (mode === 'send') {
+      if (usdAmount < 10) return Alert.alert('Minimum 10 USDC', 'Enter at least 10 USDC to send.');
+      if (!quote) return Alert.alert('No quote', 'Unable to get exchange rate. Try again.');
+      if (!recipientName.trim()) return Alert.alert('Recipient Name', 'Enter the recipient name.');
+      setSubmitting(true);
+      const res = await transferApi.offramp({
+        amountUsdc: usdAmount,
+        recipientName: recipientName.trim(),
+        recipientPhone: recipientPhone.trim() || undefined,
+        recipientNetwork,
+        purpose: selectedPurpose.label,
+      });
+      setSubmitting(false);
+      if (res.success) {
+        Alert.alert('Transfer Submitted!', res.data?.message || 'Your transfer is being processed.');
+        setAmount('500');
+        setRecipientName('');
+        setRecipientPhone('');
+        setQuote(null);
+      } else {
+        Alert.alert('Error', res.message || 'Transfer failed.');
+      }
     } else {
-      Alert.alert('Error', res.message || 'Transfer failed.');
+      const fiatAmount = parseFloat(amount.replace(/,/g, '')) * liveRate || 0;
+      if (fiatAmount < 10000) return Alert.alert('Minimum UGX 10,000', 'Enter a larger amount.');
+      if (!recipientPhone.trim()) return Alert.alert('Phone Number', 'Enter your MTN/Airtel phone number.');
+      setSubmitting(true);
+      const res = await transferApi.onramp({
+        fiatAmount,
+        phoneNumber: recipientPhone.trim(),
+        network: recipientNetwork,
+      });
+      setSubmitting(false);
+      if (res.success) {
+        Alert.alert('Deposit Request Submitted!', res.data?.message || `Pay UGX ${fiatAmount.toLocaleString()} via ${recipientNetwork} to receive USDC.`);
+        setAmount('500');
+        setRecipientPhone('');
+      } else {
+        Alert.alert('Error', res.message || 'Deposit request failed.');
+      }
     }
   };
 
@@ -143,148 +185,231 @@ export default function SmartTransfer() {
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <TouchableOpacity style={styles.backButton}>
-            <MaterialCommunityIcons name="arrow-left" size={24} color={Colors.primary} />
-          </TouchableOpacity>
           <Text style={styles.headerTitle}>Smart Transfer</Text>
         </View>
         <View style={styles.headerRight}>
-          <MaterialCommunityIcons name="bell-outline" size={24} color={Colors.primary} />
           <View style={styles.headerAvatar}>
-            <Text style={styles.headerAvatarText}>JD</Text>
+            <Text style={styles.headerAvatarText}>KZ</Text>
           </View>
         </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View style={styles.transferCard}>
-          <View style={styles.fieldGroup}>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>You send</Text>
-              <View style={styles.fieldInputRow}>
-                <View style={styles.currencyBadgeLeft}>
-                  <MaterialCommunityIcons name="currency-usd" size={18} color={Colors.primary} />
-                  <Text style={styles.currencyBadgeText}>USD</Text>
-                </View>
-                <TextInput
-                  style={styles.fieldInput}
-                  value={amount}
-                  onChangeText={setAmount}
-                  keyboardType="decimal-pad"
-                  placeholderTextColor={Colors.outline}
-                />
-              </View>
-            </View>
+        <StellarPath mode={mode} />
 
-            <View style={styles.swapButton}>
-              <MaterialCommunityIcons name="arrow-down" size={20} color={Colors.onSecondaryContainer} />
-            </View>
-
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>They receive</Text>
-              <View style={[styles.fieldInputRow, { backgroundColor: Colors.secondaryFixed + '33' }]}>
-                <View style={[styles.currencyBadgeLeft, { backgroundColor: Colors.secondaryFixed }]}>
-                  <MaterialCommunityIcons name="currency-usd" size={18} color={Colors.secondary} />
-                  <Text style={[styles.currencyBadgeText, { color: Colors.secondary }]}>UGX</Text>
-                </View>
-                <Animated.Text style={[styles.fieldInputResult, { transform: [{ scale: scaleAnim }] }]}>
-                  {loading ? '...' : (quote?.receiveAmountUgx || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                </Animated.Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.detailsRow}>
-            <View style={styles.detailItem}>
-              <MaterialCommunityIcons name="bank-transfer" size={18} color={Colors.primary} />
-              <View style={styles.detailInfo}>
-                <Text style={styles.detailLabel}>Fee</Text>
-                <Text style={styles.detailValue}>${(quote?.feeUsdc || 0.5).toFixed(2)}</Text>
-              </View>
-            </View>
-            <View style={[styles.detailItem, { backgroundColor: Colors.secondary + '0D' }]}>
-              <MaterialCommunityIcons name="lightning-bolt" size={18} color={Colors.secondary} />
-              <View style={styles.detailInfo}>
-                <Text style={styles.detailLabel}>Arrival</Text>
-                <Text style={[styles.detailValue, { color: Colors.secondary }]}>{quote?.estimatedArrival || '~5 seconds'}</Text>
-              </View>
-            </View>
-            <View style={[styles.detailItem, { backgroundColor: Colors.tertiary + '0D' }]}>
-              <MaterialCommunityIcons name="swap-horizontal-bold" size={18} color={Colors.tertiary} />
-              <View style={styles.detailInfo}>
-                <Text style={styles.detailLabel}>Rate</Text>
-                <Text style={[styles.detailValue, { color: Colors.tertiary }]}>{quote?.rate.toLocaleString() || '3,750'}</Text>
-              </View>
-            </View>
-          </View>
+        <View style={styles.modeToggle}>
+          <TouchableOpacity
+            style={[styles.modeButton, mode === 'send' && styles.modeButtonActive]}
+            onPress={() => setMode('send')}
+          >
+            <MaterialCommunityIcons name="send" size={18} color={mode === 'send' ? Colors.onPrimary : Colors.primary} />
+            <Text style={[styles.modeText, mode === 'send' && styles.modeTextActive]}>Send</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeButton, mode === 'deposit' && styles.modeButtonActive]}
+            onPress={() => setMode('deposit')}
+          >
+            <MaterialCommunityIcons name="download" size={18} color={mode === 'deposit' ? Colors.onPrimary : Colors.primary} />
+            <Text style={[styles.modeText, mode === 'deposit' && styles.modeTextActive]}>Deposit</Text>
+          </TouchableOpacity>
         </View>
 
-        <StellarPath />
+        <View style={styles.rateBanner}>
+          <MaterialCommunityIcons name="currency-usd" size={16} color={Colors.onPrimary} />
+          <Text style={styles.rateText}>
+            1 USDC ≈ UGX {liveRate.toLocaleString()}
+          </Text>
+          <View style={styles.rateLiveDot} />
+          <Text style={styles.rateLiveLabel}>Live</Text>
+        </View>
 
-        <View style={styles.purposeSection}>
-          <Text style={styles.sectionLabel}>Select Purpose</Text>
-          <TouchableOpacity style={styles.picker} onPress={() => setShowPicker(!showPicker)}>
-            <View style={styles.pickerLeft}>
-              <View style={styles.pickerIcon}>
-                <MaterialCommunityIcons name={selectedPurpose.icon} size={20} color={Colors.primary} />
-              </View>
-              <View>
-                <Text style={styles.pickerLabel}>{selectedPurpose.label}</Text>
-                <Text style={styles.pickerDesc}>{selectedPurpose.desc}</Text>
-              </View>
+        <Animated.View style={[styles.amountCard, { transform: [{ scale: scaleAnim }] }]}>
+          <Text style={styles.amountLabel}>{mode === 'send' ? 'You Send' : 'You Deposit'}</Text>
+          <View style={styles.amountRow}>
+            <Text style={styles.currencySign}>
+              {mode === 'send' ? '$' : 'UGX'}
+            </Text>
+            <TextInput
+              style={styles.amountInput}
+              value={amount}
+              onChangeText={setAmount}
+              keyboardType="decimal-pad"
+              placeholder={mode === 'send' ? '500' : '1,000,000'}
+              placeholderTextColor={Colors.outline}
+            />
+          </View>
+          {mode === 'send' && (
+            <View style={styles.amountMeta}>
+              <Text style={styles.amountMetaText}>≈ UGX {((usdAmount * liveRate) || 0).toLocaleString()}</Text>
             </View>
-            <MaterialCommunityIcons name={showPicker ? 'chevron-up' : 'chevron-down'} size={24} color={Colors.outline} />
-          </TouchableOpacity>
-          {showPicker && (
-            <View style={styles.pickerDropdown}>
-              {PURPOSES.map((p) => (
-                <TouchableOpacity
-                  key={p.value}
-                  style={[styles.pickerOption, selectedPurpose.value === p.value && styles.pickerOptionActive]}
-                  onPress={() => { setSelectedPurpose(p); setShowPicker(false); }}
-                >
-                  <View style={[styles.pickerOptionIcon, selectedPurpose.value === p.value && { backgroundColor: Colors.primaryFixed }]}>
-                    <MaterialCommunityIcons name={p.icon} size={20} color={selectedPurpose.value === p.value ? Colors.primary : Colors.onSurfaceVariant} />
-                  </View>
-                  <View style={styles.pickerOptionText}>
-                    <Text style={[styles.pickerOptionLabel, selectedPurpose.value === p.value && { color: Colors.primary }]}>{p.label}</Text>
-                    <Text style={styles.pickerOptionDesc}>{p.desc}</Text>
-                  </View>
-                  {selectedPurpose.value === p.value && (
-                    <MaterialCommunityIcons name="check-circle" size={20} color={Colors.primary} />
-                  )}
-                </TouchableOpacity>
-              ))}
+          )}
+        </Animated.View>
+
+        {mode === 'send' && quote && (
+          <View style={styles.quoteCard}>
+            <Text style={styles.quoteTitle}>Transfer Breakdown</Text>
+            <View style={styles.quoteRow}>
+              <Text style={styles.quoteLabel}>Amount</Text>
+              <Text style={styles.quoteValue}>${quote.sendAmountUsdc.toFixed(2)} USDC</Text>
             </View>
+            <View style={styles.quoteRow}>
+              <Text style={styles.quoteLabel}>Fee (0.5%)</Text>
+              <Text style={styles.quoteValue}>${quote.feeUsdc.toFixed(2)} USDC</Text>
+            </View>
+            <View style={styles.quoteDivider} />
+            <View style={styles.quoteRow}>
+              <Text style={[styles.quoteLabel, { fontWeight: '700' }]}>Recipient Gets</Text>
+              <Text style={[styles.quoteValue, { color: Colors.primary, fontWeight: '700' }]}>
+                UGX {quote.receiveAmountUgx.toLocaleString()}
+              </Text>
+            </View>
+            <View style={styles.quoteRow}>
+              <Text style={styles.quoteLabel}>Rate</Text>
+              <Text style={styles.quoteValue}>1 USDC = UGX {quote.rate.toLocaleString()}</Text>
+            </View>
+            <View style={styles.quoteRow}>
+              <Text style={styles.quoteLabel}>Delivery</Text>
+              <Text style={styles.quoteValue}>{quote.estimatedArrival}</Text>
+            </View>
+          </View>
+        )}
+
+        {mode === 'deposit' && (
+          <View style={styles.quoteCard}>
+            <Text style={styles.quoteTitle}>Estimated Deposit</Text>
+            <View style={styles.quoteRow}>
+              <Text style={styles.quoteLabel}>You Pay</Text>
+              <Text style={styles.quoteValue}>UGX {((usdAmount || 0) * liveRate).toLocaleString()}</Text>
+            </View>
+            <View style={styles.quoteRow}>
+              <Text style={styles.quoteLabel}>You Receive (est.)</Text>
+              <Text style={styles.quoteValue}>
+                ${(((usdAmount || 0) * liveRate * 0.98) / liveRate).toFixed(2)} USDC
+              </Text>
+            </View>
+            <View style={styles.quoteRow}>
+              <Text style={styles.quoteLabel}>Fee (2%)</Text>
+              <Text style={styles.quoteValue}>UGX {Math.round(((usdAmount || 0) * liveRate * 0.02)).toLocaleString()}</Text>
+            </View>
+            <View style={styles.quoteDivider} />
+            <View style={styles.quoteRow}>
+              <Text style={styles.quoteLabel}>Rate</Text>
+              <Text style={styles.quoteValue}>1 USDC ≈ UGX {liveRate.toLocaleString()}</Text>
+            </View>
+          </View>
+        )}
+
+        {loading && <ActivityIndicator color={Colors.primary} style={{ marginTop: 12 }} />}
+
+        <View style={styles.recipientCard}>
+          <Text style={styles.sectionLabel}>{mode === 'send' ? 'Recipient Details' : 'Your Details'}</Text>
+
+          {mode === 'send' && (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="Full name (e.g., Maama Namubiru)"
+                placeholderTextColor={Colors.outline}
+                value={recipientName}
+                onChangeText={setRecipientName}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Phone (optional, e.g., +256712345678)"
+                placeholderTextColor={Colors.outline}
+                value={recipientPhone}
+                onChangeText={setRecipientPhone}
+                keyboardType="phone-pad"
+              />
+            </>
+          )}
+
+          {mode === 'deposit' && (
+            <TextInput
+              style={styles.input}
+              placeholder="Your MTN/Airtel phone number"
+              placeholderTextColor={Colors.outline}
+              value={recipientPhone}
+              onChangeText={setRecipientPhone}
+              keyboardType="phone-pad"
+            />
+          )}
+
+          <View style={styles.networkRow}>
+            {NETWORKS.map((net) => (
+              <TouchableOpacity
+                key={net}
+                style={[styles.networkChip, recipientNetwork === net && styles.networkChipActive]}
+                onPress={() => setRecipientNetwork(net as 'MTN' | 'AIRTEL')}
+              >
+                <MaterialCommunityIcons
+                  name={net === 'MTN' ? 'signal-cellular-3' : 'signal-cellular-2'}
+                  size={16}
+                  color={recipientNetwork === net ? Colors.onPrimary : Colors.primary}
+                />
+                <Text style={[styles.networkText, recipientNetwork === net && styles.networkTextActive]}>
+                  {net}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {mode === 'send' && (
+            <>
+              <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Purpose</Text>
+              <TouchableOpacity style={styles.purposePicker} onPress={() => setShowPicker(!showPicker)}>
+                <View style={styles.purposeRow}>
+                  <MaterialCommunityIcons name={selectedPurpose.icon} size={20} color={Colors.primary} />
+                  <View style={styles.purposeTextWrap}>
+                    <Text style={styles.purposeLabel}>{selectedPurpose.label}</Text>
+                    <Text style={styles.purposeDesc}>{selectedPurpose.desc}</Text>
+                  </View>
+                  <MaterialCommunityIcons name={showPicker ? 'chevron-up' : 'chevron-down'} size={20} color={Colors.outline} />
+                </View>
+              </TouchableOpacity>
+
+              {showPicker && (
+                <View style={styles.pickerList}>
+                  {PURPOSES.map((p) => (
+                    <TouchableOpacity
+                      key={p.value}
+                      style={[styles.pickerItem, selectedPurpose.value === p.value && styles.pickerItemActive]}
+                      onPress={() => { setSelectedPurpose(p); setShowPicker(false); }}
+                    >
+                      <MaterialCommunityIcons name={p.icon} size={20} color={selectedPurpose.value === p.value ? Colors.primary : Colors.onSurfaceVariant} />
+                      <View>
+                        <Text style={[styles.pickerLabel, selectedPurpose.value === p.value && { color: Colors.primary }]}>{p.label}</Text>
+                        <Text style={styles.pickerDesc}>{p.desc}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </>
           )}
         </View>
 
         <TouchableOpacity
-          style={[styles.reviewButton, submitting && { opacity: 0.6 }]}
+          style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
           activeOpacity={0.8}
-          onPress={handleReview}
+          onPress={handleSubmit}
           disabled={submitting}
         >
-          <View style={styles.reviewButtonContent}>
-            <Text style={styles.reviewButtonText}>{submitting ? 'Processing...' : 'Review Transfer'}</Text>
-            <Text style={styles.reviewButtonSub}>
-              ${usdAmount.toFixed(2)} → {(quote?.receiveAmountUgx || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} UGX
-            </Text>
-          </View>
-          <View style={styles.reviewArrow}>
-            <MaterialCommunityIcons name="arrow-right" size={24} color={Colors.onPrimary} />
-          </View>
+          {submitting ? (
+            <ActivityIndicator color={Colors.onPrimary} />
+          ) : (
+            <>
+              <MaterialCommunityIcons
+                name={mode === 'send' ? 'send' : 'download'}
+                size={20}
+                color={Colors.onPrimary}
+              />
+              <Text style={styles.submitText}>
+                {mode === 'send' ? 'Send via Kotani Pay' : 'Request via Kotani Pay'}
+              </Text>
+            </>
+          )}
         </TouchableOpacity>
-
-        <View style={styles.infoBanner}>
-          <MaterialCommunityIcons name="lightbulb-outline" size={24} color={Colors.secondary} />
-          <View style={styles.infoBannerContent}>
-            <Text style={styles.infoBannerTitle}>Smart Feature</Text>
-            <Text style={styles.infoBannerDesc}>
-              Transfers to <Text style={styles.infoBannerBold}>{selectedPurpose.label}</Text> automatically generate a digital receipt shareable with your recipient.
-            </Text>
-          </View>
-        </View>
       </ScrollView>
     </View>
   );
@@ -297,50 +422,72 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.containerPaddingMobile, paddingVertical: Spacing.stackSm,
     backgroundColor: Colors.surface, ...Shadow.level1,
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm },
-  backButton: { padding: 8, borderRadius: BorderRadius.full },
+  headerLeft: {},
   headerTitle: { fontSize: Typography.headlineMd.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackMd },
-  headerAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.primaryFixed, justifyContent: 'center', alignItems: 'center' },
-  headerAvatarText: { fontWeight: '700', color: Colors.onPrimaryFixed },
-  scrollContent: { paddingHorizontal: Spacing.containerPaddingMobile, paddingTop: Spacing.gutter, paddingBottom: 100, gap: Spacing.stackLg },
-  transferCard: { backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: Colors.surfaceContainerHighest + '80', ...Shadow.level1 },
-  fieldGroup: { gap: Spacing.stackSm },
-  field: { gap: 8 },
-  fieldLabel: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurfaceVariant },
-  fieldInputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surfaceContainerLow, paddingHorizontal: Spacing.stackMd, paddingVertical: 4, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.outlineVariant + '4D' },
-  currencyBadgeLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.primaryFixed, paddingHorizontal: 12, paddingVertical: 8, borderRadius: BorderRadius.md },
-  currencyBadgeText: { fontWeight: '700', color: Colors.primary },
-  fieldInput: { flex: 1, fontSize: Typography.headlineMd.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary, textAlign: 'right', paddingVertical: 12 },
-  fieldInputResult: { fontSize: Typography.headlineMd.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.secondary, textAlign: 'right', paddingVertical: 12 },
-  swapButton: { alignSelf: 'center', backgroundColor: Colors.secondaryContainer, padding: 10, borderRadius: BorderRadius.full, marginVertical: -14, zIndex: 1, borderWidth: 3, borderColor: Colors.surfaceContainerLowest },
-  detailsRow: { flexDirection: 'row', gap: Spacing.stackSm, marginTop: Spacing.gutter },
-  detailItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.primary + '0D', padding: 10, borderRadius: BorderRadius.md },
-  detailInfo: {},
-  detailLabel: { fontSize: 9, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurfaceVariant, letterSpacing: 0.3, textTransform: 'uppercase' },
-  detailValue: { fontSize: 12, fontFamily: 'Inter', fontWeight: '700', color: Colors.primary },
-  purposeSection: { gap: 8 },
-  sectionLabel: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurfaceVariant },
-  picker: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Colors.surfaceContainerLowest, borderWidth: 1, borderColor: Colors.outlineVariant, borderRadius: BorderRadius.xl, padding: Spacing.stackMd },
-  pickerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm },
-  pickerIcon: { width: 40, height: 40, borderRadius: BorderRadius.lg, backgroundColor: Colors.surfaceContainerHigh, justifyContent: 'center', alignItems: 'center' },
-  pickerLabel: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurface },
-  pickerDesc: { fontSize: 11, fontFamily: 'Inter', color: Colors.onSurfaceVariant, marginTop: 1 },
-  pickerDropdown: { backgroundColor: Colors.surfaceContainerLowest, borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: Colors.outlineVariant, ...Shadow.level2, overflow: 'hidden' },
-  pickerOption: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm, padding: Spacing.stackMd, borderBottomWidth: 1, borderBottomColor: Colors.outlineVariant + '33' },
-  pickerOptionActive: { backgroundColor: Colors.primary + '08' },
-  pickerOptionIcon: { width: 40, height: 40, borderRadius: BorderRadius.lg, backgroundColor: Colors.surfaceContainerHigh, justifyContent: 'center', alignItems: 'center' },
-  pickerOptionText: { flex: 1 },
-  pickerOptionLabel: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurface },
-  pickerOptionDesc: { fontSize: 11, fontFamily: 'Inter', color: Colors.onSurfaceVariant },
-  reviewButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Colors.primary, padding: Spacing.stackMd, borderRadius: BorderRadius.xl, ...Shadow.level2 },
-  reviewButtonContent: {},
-  reviewButtonText: { fontSize: Typography.headlineSm.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.onPrimary },
-  reviewButtonSub: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onPrimary, opacity: 0.8, marginTop: 2 },
-  reviewArrow: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center' },
-  infoBanner: { flexDirection: 'row', gap: Spacing.stackMd, padding: Spacing.stackMd, backgroundColor: Colors.secondaryContainer + '1A', borderWidth: 1, borderColor: Colors.secondaryContainer + '33', borderRadius: BorderRadius.xl },
-  infoBannerContent: { flex: 1, gap: 4 },
-  infoBannerTitle: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', fontWeight: '700', color: Colors.onSecondaryContainer },
-  infoBannerDesc: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onSecondaryContainer, opacity: 0.8, lineHeight: 20 },
-  infoBannerBold: { fontWeight: '700' },
+  headerRight: {},
+  headerAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.primaryContainer, justifyContent: 'center', alignItems: 'center' },
+  headerAvatarText: { fontSize: 14, fontWeight: '700', color: Colors.onPrimary },
+  scrollContent: { padding: Spacing.containerPaddingMobile, paddingBottom: 40 },
+  modeToggle: { flexDirection: 'row', gap: 8, marginTop: Spacing.gutter, marginBottom: Spacing.stackMd },
+  modeButton: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 12, borderRadius: BorderRadius.xl, backgroundColor: Colors.surfaceContainerLowest,
+    borderWidth: 1, borderColor: Colors.outlineVariant + '4D', ...Shadow.level1,
+  },
+  modeButtonActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  modeText: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.primary },
+  modeTextActive: { color: Colors.onPrimary },
+  rateBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.primary,
+    paddingHorizontal: 16, paddingVertical: 12, borderRadius: BorderRadius.xl, marginBottom: Spacing.gutter, ...Shadow.level1,
+  },
+  rateText: { flex: 1, fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onPrimary },
+  rateLiveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.secondaryContainer },
+  rateLiveLabel: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.secondaryContainer },
+  amountCard: { backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.gutter, borderRadius: BorderRadius.xl, ...Shadow.level1, borderWidth: 1, borderColor: Colors.outlineVariant + '33' },
+  amountLabel: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurfaceVariant, letterSpacing: 1, textTransform: 'uppercase' },
+  amountRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  currencySign: { fontSize: Typography.displayLgMobile.fontSize, fontFamily: 'Montserrat', fontWeight: '700', color: Colors.primary },
+  amountInput: { flex: 1, fontSize: Typography.displayLgMobile.fontSize, fontFamily: 'Montserrat', fontWeight: '700', color: Colors.primary },
+  amountMeta: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: Colors.outlineVariant + '33' },
+  amountMetaText: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onSurfaceVariant },
+  quoteCard: { backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: BorderRadius.xl, marginTop: Spacing.gutter, borderWidth: 1, borderColor: Colors.outlineVariant + '33' },
+  quoteTitle: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.primary, marginBottom: Spacing.stackSm },
+  quoteRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  quoteLabel: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onSurfaceVariant },
+  quoteValue: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurface },
+  quoteDivider: { height: 1, backgroundColor: Colors.outlineVariant + '4D', marginVertical: 4 },
+  recipientCard: { marginTop: Spacing.gutter, gap: 12 },
+  sectionLabel: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.primary },
+  input: {
+    backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd,
+    borderRadius: BorderRadius.xl, fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter',
+    color: Colors.onSurface, borderWidth: 1, borderColor: Colors.outlineVariant + '4D',
+  },
+  networkRow: { flexDirection: 'row', gap: 8 },
+  networkChip: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 12, borderRadius: BorderRadius.xl, backgroundColor: Colors.surfaceContainerLowest,
+    borderWidth: 1, borderColor: Colors.outlineVariant + '4D',
+  },
+  networkChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  networkText: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.primary },
+  networkTextActive: { color: Colors.onPrimary },
+  purposePicker: { backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: Colors.outlineVariant + '4D' },
+  purposeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  purposeTextWrap: { flex: 1 },
+  purposeLabel: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurface },
+  purposeDesc: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onSurfaceVariant },
+  pickerList: { backgroundColor: Colors.surfaceContainerLowest, borderRadius: BorderRadius.xl, overflow: 'hidden', ...Shadow.level2 },
+  pickerItem: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: Spacing.stackMd, borderBottomWidth: 1, borderBottomColor: Colors.outlineVariant + '33' },
+  pickerItemActive: { backgroundColor: Colors.primaryFixed + '1A' },
+  pickerLabel: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurface },
+  pickerDesc: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onSurfaceVariant },
+  submitButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: Colors.primary, paddingVertical: 16, borderRadius: BorderRadius.xl,
+    marginTop: Spacing.gutter, ...Shadow.level2,
+  },
+  submitButtonDisabled: { opacity: 0.6 },
+  submitText: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '700', color: Colors.onPrimary },
 });

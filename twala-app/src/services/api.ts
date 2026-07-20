@@ -1,8 +1,25 @@
-const BASE_URL = __DEV__
-  ? 'http://192.168.1.100:4000/api'  // Change to your dev machine's LAN IP
-  : 'https://your-production-api.com/api';
+import { Platform } from 'react-native';
+
+// Use localhost for mobile emulator/simulator or web
+const LOCAL_DEV = Platform.OS === 'web'
+  ? 'http://localhost:4000/api'
+  : Platform.OS === 'android'
+    ? 'http://10.0.2.2:4000/api'  // Android emulator localhost alias
+    : 'http://localhost:4000/api'; // iOS simulator
+
+const BASE_URL = __DEV__ ? LOCAL_DEV : 'https://your-production-api.com/api';
 
 let cachedBaseUrl = BASE_URL;
+let lastConnectivityCheck = 0;
+let _isConnected = true;
+
+export function isConnected(): boolean {
+  return _isConnected;
+}
+
+export function getBaseUrl(): string {
+  return cachedBaseUrl;
+}
 
 export function setApiUrl(url: string) {
   cachedBaseUrl = url;
@@ -10,15 +27,27 @@ export function setApiUrl(url: string) {
 
 async function request<T>(path: string, options?: RequestInit): Promise<{ success: boolean; data: T; message?: string }> {
   const url = `${cachedBaseUrl}${path}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
   try {
     const res = await fetch(url, {
       ...options,
       headers: { 'Content-Type': 'application/json', ...options?.headers },
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
+    _isConnected = true;
     return res.json();
-  } catch (err) {
-    console.warn(`[API] ${path} failed:`, err);
-    return { success: false, data: null as any, message: 'Network error' };
+  } catch (err: any) {
+    clearTimeout(timeout);
+    _isConnected = false;
+    if (err?.name === 'AbortError') {
+      console.warn(`[API] ${path} timed out`);
+      return { success: false, data: null as any, message: 'Request timed out. Is the backend running?' };
+    }
+    console.warn(`[API] ${path} failed:`, err?.message || err);
+    return { success: false, data: null as any, message: `Cannot reach server (${cachedBaseUrl}). Ensure the backend is running.` };
   }
 }
 
@@ -42,8 +71,13 @@ export interface TransferQuote {
 
 export const transferApi = {
   quote: (amount: number) => request<TransferQuote>(`/transfer/quote?amount=${amount}`),
-  submit: (body: { amountUsdc: number; recipientName: string; recipientPhone?: string; recipientNetwork?: string; purpose: string }) =>
-    request<{ transaction: any; quote: TransferQuote; message: string }>('/transfer/submit', { method: 'POST', body: JSON.stringify(body) }),
+  offramp: (body: { amountUsdc: number; recipientName: string; recipientPhone?: string; recipientNetwork?: string; purpose: string }) =>
+    request<{ transaction: any; quote: TransferQuote; kotaniReferenceId: string; message: string }>('/transfer/offramp', { method: 'POST', body: JSON.stringify(body) }),
+  onramp: (body: { fiatAmount: number; phoneNumber: string; network: string }) =>
+    request<{ transaction: any; kotaniReferenceId: string; message: string }>('/transfer/onramp', { method: 'POST', body: JSON.stringify(body) }),
+  status: (referenceId: string) => request<{ transaction: any; kotaniStatus: any }>(`/transfer/status/${referenceId}`),
+  retry: (referenceId: string) => request<{ transaction: any }>(`/transfer/retry/${referenceId}`, { method: 'POST' }),
+  kotaniBalance: () => request<any>('/transfer/kotani-balance'),
 };
 
 // History
