@@ -8,14 +8,14 @@ router.get('/', (_req, res) => {
   res.json({ success: true, data: history });
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { message } = req.body;
   if (!message || !message.trim()) {
     return res.status(400).json({ success: false, message: 'Message required' });
   }
 
   try {
-    const history = ai.chat(message.trim());
+    const history = await ai.chat(message.trim());
     res.json({ success: true, data: history });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
