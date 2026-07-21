@@ -25,6 +25,7 @@ app.get('/api/health', (_req, res) => {
       status: 'ok',
       stellarNetwork: config.stellar.network,
       stellarHorizon: config.stellar.horizonUrl,
+      usdcIssuer: config.stellar.usdcIssuer,
       walletExists: !!store.wallet,
       walletAddress: store.wallet?.publicKey || null,
       walletFunded: store.wallet?.isFunded || false,
@@ -44,7 +45,7 @@ app.use('/api/chat', chatRouter);
 app.use('/api/rates', ratesRouter);
 app.use('/api/kotani', kotaniRouter);
 
-app.listen(config.port, '0.0.0.0', () => {
+app.listen(config.port, '0.0.0.0', async () => {
   console.log(`\n  🏦 Twala Backend running`);
   console.log(`  ─────────────────────`);
   console.log(`  Network : ${config.stellar.network}`);
@@ -54,24 +55,37 @@ app.listen(config.port, '0.0.0.0', () => {
   console.log(`  Address : http://localhost:${config.port}`);
   console.log(`  API     : http://localhost:${config.port}/api/health\n`);
 
-  // Create demo wallet on startup
-  stellar.createWallet()
-    .then(async (w) => {
-      console.log(`  ✅ Wallet  : ${w.publicKey} ${w.isFunded ? '(funded via Friendbot)' : '(unfunded)'}`);
-      if (w.isFunded) {
-        try {
-          await stellar.ensureTrustline(w.secretKey);
-          console.log(`  ✅ Trustline: USDC trustline established`);
-        } catch (tlErr) {
-          const msg = tlErr instanceof Error ? tlErr.message : String(tlErr);
-          console.log(`  ⚠️  Trustline: ${msg}`);
-        }
+  // Step 1: Initialize test USDC issuer (testnet only)
+  await stellar.initializeTestUsdc();
+
+  // Step 2: Create demo wallet
+  try {
+    const wallet = await stellar.createWallet();
+    console.log(`  ✅ Wallet  : ${wallet.publicKey} ${wallet.isFunded ? '(funded via Friendbot)' : '(unfunded)'}`);
+    console.log(`  👛 Secret  : ${wallet.secretKey}`);
+
+    // Step 3: Establish USDC trustline
+    if (wallet.isFunded) {
+      try {
+        await stellar.ensureTrustline(wallet.secretKey);
+        console.log(`  ✅ Trustline: USDC trustline established`);
+      } catch (tlErr) {
+        const msg = tlErr instanceof Error ? tlErr.message : String(tlErr);
+        console.log(`  ⚠️  Trustline: ${msg}`);
       }
-      const balance = await stellar.getBalance(w.publicKey);
-      console.log(`  💰 Balance : $${balance.usdc.toFixed(2)} USDC · ${balance.xlm.toFixed(2)} XLM`);
-    })
-    .catch((err) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.log(`  ⚠️  Wallet  : ${msg}`);
-    });
+
+      // Step 4: Mint test USDC to wallet
+      await stellar.mintTestUsdc(wallet.secretKey, config.testUsdc.initialMintAmount);
+    }
+
+    // Step 5: Show final balances
+    const balance = await stellar.getBalance(wallet.publicKey);
+    console.log(`  💰 Balance : $${balance.usdc.toFixed(2)} USDC · ${balance.xlm.toFixed(2)} XLM`);
+    if (wallet.isFunded && balance.usdc > 0) {
+      console.log(`  🎉 Wallet is ready for test transactions!`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`  ⚠️  Wallet  : ${msg}`);
+  }
 });

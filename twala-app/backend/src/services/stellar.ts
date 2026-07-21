@@ -24,12 +24,10 @@ const SUBMIT_TIMEOUT_MS = 30000;
 const TX_TIMEOUT_SECONDS = 300;
 
 // ---------------------------------------------------------------------------
-// Server & Asset
+// Server & Dynamic Asset
 // ---------------------------------------------------------------------------
 
 const server = new Horizon.Server(config.stellar.horizonUrl);
-
-const usdcAsset = new Asset('USDC', config.stellar.usdcIssuer);
 
 function getNetworkPassphrase(): string {
   return config.stellar.network === 'TESTNET' ? Networks.TESTNET : Networks.PUBLIC;
@@ -39,8 +37,12 @@ function isTestnet(): boolean {
   return config.stellar.network === 'TESTNET';
 }
 
+function getUsdcAsset(): Asset {
+  return new Asset('USDC', config.stellar.usdcIssuer);
+}
+
 // ---------------------------------------------------------------------------
-// Fee estimation — fetches live network fee or falls back to BASE_FEE
+// Fee estimation
 // ---------------------------------------------------------------------------
 
 let cachedFeeStats: StellarFeeStats | null = null;
@@ -100,7 +102,7 @@ export async function getRecommendedFee(): Promise<StellarFeeStats> {
 }
 
 // ---------------------------------------------------------------------------
-// Account loader with caching to reduce Horizon calls
+// Account cache
 // ---------------------------------------------------------------------------
 
 const accountCache = new Map<string, { account: any; fetchedAt: number }>();
@@ -133,7 +135,7 @@ export function clearAccountCache(publicKey: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Account info — rich account data
+// Account info
 // ---------------------------------------------------------------------------
 
 export async function getAccountInfo(publicKey: string): Promise<StellarAccountInfo> {
@@ -200,7 +202,109 @@ export async function getAccountInfo(publicKey: string): Promise<StellarAccountI
 }
 
 // ---------------------------------------------------------------------------
-// Wallet creation with Friendbot funding
+// Test USDC issuer — creates a self-managed USDC issuer on testnet
+// ---------------------------------------------------------------------------
+
+export async function initializeTestUsdc(): Promise<void> {
+  if (!isTestnet()) return;
+  if (process.env.USDC_ISSUER) return; // respect explicit config
+
+  console.log(`  🔄 Initializing test USDC...`);
+
+  // Step 1: Create issuer keypair
+  const issuer = Keypair.random();
+  const issuerPublic = issuer.publicKey();
+  const issuerSecret = issuer.secret();
+
+  // Step 2: Fund issuer via Friendbot
+  try {
+    const fbResponse = await fetch(
+      `https://friendbot.stellar.org?addr=${issuerPublic}`,
+      { signal: AbortSignal.timeout(15000) }
+    );
+    if (!fbResponse.ok) {
+      const errBody = await fbResponse.text().catch(() => '');
+      throw new Error(`Friendbot returned ${fbResponse.status}: ${errBody}`);
+    }
+    console.log(`  ✅ Issuer funded: ${issuerPublic.slice(0, 8)}...`);
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      console.log(`  ⚠️  Issuer funding timed out. USDC will be $0.`);
+      return;
+    }
+    console.log(`  ⚠️  Issuer funding failed: ${err.message}`);
+    return;
+  }
+
+  // Step 3: Update config to use our issuer
+  config.stellar.usdcIssuer = issuerPublic;
+  config.stellar.usdcIssuerSecret = issuerSecret;
+  config.testUsdc.issuerSecret = issuerSecret;
+
+  console.log(`  ✅ USDC issuer set to self-managed account`);
+}
+
+// ---------------------------------------------------------------------------
+// Mint test USDC to wallet
+// ---------------------------------------------------------------------------
+
+export async function mintTestUsdc(walletSecret: string, amount: number = config.testUsdc.initialMintAmount): Promise<void> {
+  if (!isTestnet()) return;
+  if (!config.testUsdc.issuerSecret) {
+    console.log(`  ⚠️  No test USDC issuer configured. Skipping mint.`);
+    return;
+  }
+
+  const walletKeypair = Keypair.fromSecret(walletSecret);
+  const walletPublic = walletKeypair.publicKey();
+  const issuerKeypair = Keypair.fromSecret(config.testUsdc.issuerSecret);
+  const issuerPublic = config.stellar.usdcIssuer;
+
+  console.log(`  🔄 Minting ${amount} test USDC to wallet...`);
+
+  // Step 1: Ensure wallet has trustline to our USDC
+  try {
+    await ensureTrustline(walletSecret);
+  } catch (err: any) {
+    console.log(`  ⚠️  Trustline setup: ${err.message}`);
+    return;
+  }
+
+  // Step 2: Issuer sends USDC to wallet
+  try {
+    clearAccountCache(issuerPublic);
+    const issuerAccount = await loadAccount(issuerPublic);
+
+    const feeStats = await getRecommendedFee();
+    const fee = Math.max(feeStats.recommendedFee, 100).toString();
+
+    const tx = new TransactionBuilder(issuerAccount, {
+      fee,
+      networkPassphrase: getNetworkPassphrase(),
+    })
+      .addOperation(Operation.payment({
+        destination: walletPublic,
+        asset: getUsdcAsset(),
+        amount: amount.toFixed(7),
+      }))
+      .setTimeout(TX_TIMEOUT_SECONDS)
+      .build();
+
+    tx.sign(issuerKeypair);
+    const result = await server.submitTransaction(tx);
+
+    clearAccountCache(issuerPublic);
+    clearAccountCache(walletPublic);
+
+    console.log(`  ✅ Minted ${amount} USDC to wallet (tx: ${result.hash.slice(0, 8)}...)`);
+  } catch (err: any) {
+    const msg = extractStellarError(err);
+    console.log(`  ⚠️  USDC mint failed: ${msg}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Wallet creation
 // ---------------------------------------------------------------------------
 
 export async function createWallet(): Promise<WalletInfo> {
@@ -296,7 +400,6 @@ export async function ensureTrustline(secretKey: string): Promise<void> {
   const alreadyExists = await hasTrustline(publicKey);
   if (alreadyExists) return;
 
-  // Check XLM reserve
   try {
     const account = await server.loadAccount(publicKey);
     const nativeBalance = account.balances.find((b: any) => b.asset_type === 'native');
@@ -327,7 +430,7 @@ export async function ensureTrustline(secretKey: string): Promise<void> {
     networkPassphrase: getNetworkPassphrase(),
   })
     .addOperation(Operation.changeTrust({
-      asset: usdcAsset,
+      asset: getUsdcAsset(),
       limit: '922337203685.4775807',
     }))
     .setTimeout(TX_TIMEOUT_SECONDS)
@@ -336,7 +439,7 @@ export async function ensureTrustline(secretKey: string): Promise<void> {
   tx.sign(keypair);
 
   try {
-    const result = await server.submitTransaction(tx);
+    await server.submitTransaction(tx);
     clearAccountCache(publicKey);
   } catch (err: any) {
     const stellarErr = extractStellarError(err);
@@ -357,18 +460,15 @@ export async function submitPayment(
   const keypair = Keypair.fromSecret(secretKey);
   const publicKey = keypair.publicKey();
 
-  // Validate destination
   try {
     Keypair.fromPublicKey(destination);
   } catch {
     throw new Error(`Invalid destination address: ${destination}`);
   }
 
-  // Load account and get fresh sequence
   clearAccountCache(publicKey);
   const account = await loadAccount(publicKey);
 
-  // Validate USDC balance
   const balance = await getBalance(publicKey);
   const amountNum = parseFloat(amountUsdc);
   if (amountNum > balance.usdc) {
@@ -377,11 +477,9 @@ export async function submitPayment(
     );
   }
 
-  // Get recommended fee
   const feeStats = await getRecommendedFee();
   const fee = Math.max(feeStats.recommendedFee * 2, 100).toString();
 
-  // Build transaction
   const txBuilder = new TransactionBuilder(account, {
     fee,
     networkPassphrase: getNetworkPassphrase(),
@@ -394,7 +492,7 @@ export async function submitPayment(
   txBuilder
     .addOperation(Operation.payment({
       destination,
-      asset: usdcAsset,
+      asset: getUsdcAsset(),
       amount: amountUsdc,
     }))
     .setTimeout(TX_TIMEOUT_SECONDS);
@@ -402,7 +500,6 @@ export async function submitPayment(
   const tx = txBuilder.build();
   tx.sign(keypair);
 
-  // Submit with retry
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -414,12 +511,10 @@ export async function submitPayment(
       lastError = err;
       const stellarErr = extractStellarError(err);
 
-      // Don't retry terminal errors
       if (isTerminalError(err)) {
         throw new Error(`Payment failed: ${stellarErr}`);
       }
 
-      // Retry for transient errors with fresh sequence
       if (attempt < MAX_RETRIES) {
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
         try {
@@ -433,14 +528,14 @@ export async function submitPayment(
           retryBuilder
             .addOperation(Operation.payment({
               destination,
-              asset: usdcAsset,
+              asset: getUsdcAsset(),
               amount: amountUsdc,
             }))
             .setTimeout(TX_TIMEOUT_SECONDS);
           const retryTx = retryBuilder.build();
           retryTx.sign(keypair);
         } catch {
-          // If retry tx build fails, continue
+          // continue
         }
       }
     }
@@ -450,7 +545,7 @@ export async function submitPayment(
 }
 
 // ---------------------------------------------------------------------------
-// Transaction history from Stellar network
+// Transaction history
 // ---------------------------------------------------------------------------
 
 export async function getStellarPayments(
@@ -551,7 +646,7 @@ export async function restoreWallet(secretKey: string): Promise<WalletInfo> {
 }
 
 // ---------------------------------------------------------------------------
-// Validate a Stellar public key
+// Utilities
 // ---------------------------------------------------------------------------
 
 export function isValidPublicKey(address: string): boolean {
@@ -562,10 +657,6 @@ export function isValidPublicKey(address: string): boolean {
     return false;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Generate a new Stellar keypair (offline, no network)
-// ---------------------------------------------------------------------------
 
 export function generateKeypair(): { publicKey: string; secretKey: string } {
   const kp = Keypair.random();
