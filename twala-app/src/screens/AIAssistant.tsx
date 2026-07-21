@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Image, Animated, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Animated, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
@@ -169,17 +169,13 @@ export default function AIAssistant() {
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={styles.avatar}>
-            <Image
-              source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDxWM82cYZtvfTL2ZJPksQNsPwop0gt7O134YPbsH5D3ifP60vCxcKcOGG-6GP0HAdOngLIpctH77a-OjANA759yWasxzK9NwIo7oBow4fkDt3UZl2F8f55Rk4UqScqoZux6Hui0uQKkwN9e4MeBkEMsvkl0MifBXkDm-g5XiYw0HV3Rb3rPFKTaZfCUzvgHqjVIYQ3gLkolU2-hpjz3mpPiHWkLicepVUEmcwfSdnNoSS-1G9HizjT' }}
-              style={styles.avatarImage}
-            />
-            <View style={styles.onlineDot} />
+          <View style={styles.avatarPlaceholder}>
+            <MaterialCommunityIcons name="robot" size={24} color={Colors.onPrimary} />
           </View>
           <View>
             <Text style={styles.headerTitle}>Kanzu</Text>
             <Text style={styles.headerSub}>
-              {isTyping ? 'Thinking...' : localMode ? 'Local AI • Offline Mode' : 'Online • AI Financial Companion'}
+              {isTyping ? 'Thinking...' : isBackendOnline() ? 'Online • AI Financial Companion' : 'Disconnected'}
             </Text>
           </View>
         </View>
@@ -319,8 +315,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface, ...Shadow.level1,
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm },
-  avatar: { width: 42, height: 42, borderRadius: 21, overflow: 'hidden', borderWidth: 2, borderColor: Colors.primaryFixed, position: 'relative' },
-  avatarImage: { width: '100%', height: '100%' },
+  avatarPlaceholder: { width: 42, height: 42, borderRadius: 21, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center' },
   onlineDot: { position: 'absolute', bottom: 0, right: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: Colors.primary, borderWidth: 2, borderColor: Colors.surface },
   headerTitle: { fontSize: Typography.headlineMd.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
   headerSub: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurfaceVariant },
