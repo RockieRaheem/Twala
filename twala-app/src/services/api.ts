@@ -191,8 +191,17 @@ export const goalsApi = {
   get: (id: string) =>
     request<GoalData>(`/goals/${id}`),
 
+  create: (data: { title: string; targetAmountUgx: number; category: string; description?: string }) =>
+    request<GoalData>('/goals', { method: 'POST', body: JSON.stringify(data) }),
+
   contribute: (id: string, amountUgx: number) =>
     request<GoalData>(`/goals/${id}/contribute`, { method: 'POST', body: JSON.stringify({ amountUgx }) }),
+
+  update: (id: string, data: { title?: string; targetAmountUgx?: number; category?: string; description?: string }) =>
+    request<GoalData>(`/goals/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  remove: (id: string) =>
+    request<{ success: boolean }>(`/goals/${id}`, { method: 'DELETE' }),
 };
 
 export const chatApi = {

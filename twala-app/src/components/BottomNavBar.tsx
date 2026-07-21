@@ -13,12 +13,13 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { key: 'Dashboard', label: 'Dashboard', icon: 'view-dashboard-outline', iconFilled: 'view-dashboard' },
+  { key: 'Goals', label: 'Goals', icon: 'flag-outline', iconFilled: 'flag' },
   { key: 'Assistant', label: 'Assistant', icon: 'robot-outline', iconFilled: 'robot' },
   { key: 'Transfer', label: 'Transfer', icon: 'bank-transfer-out', iconFilled: 'bank-transfer' },
   { key: 'History', label: 'History', icon: 'history' },
 ];
 
-export type AppScreen = 'Dashboard' | 'Assistant' | 'Transfer' | 'History' | 'GoalDetail';
+export type AppScreen = 'Dashboard' | 'Goals' | 'Assistant' | 'Transfer' | 'History' | 'GoalDetail';
 
 interface Props {
   activeRoute: AppScreen;

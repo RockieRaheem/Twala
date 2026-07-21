@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import HomeDashboard from '../screens/HomeDashboard';
+import Goals from '../screens/Goals';
 import AIAssistant from '../screens/AIAssistant';
 import SmartTransfer from '../screens/SmartTransfer';
 import GoalDetail from '../screens/GoalDetail';
@@ -45,6 +46,8 @@ export default function AppNavigator() {
     switch (currentScreen) {
       case 'Dashboard':
         return <HomeDashboard onNavigate={navigate} onNavigateGoal={navigateToGoal} />;
+      case 'Goals':
+        return <Goals onNavigateGoal={navigateToGoal} />;
       case 'Assistant':
         return <AIAssistant />;
       case 'Transfer':
