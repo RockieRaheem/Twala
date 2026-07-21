@@ -73,19 +73,25 @@ router.get('/balance', async (_req, res) => {
 });
 
 router.get('/info', async (_req, res) => {
-  const wallet = await db.getWallet();
-  if (!wallet) {
-    return res.json({ success: true, data: null });
+  try {
+    const wallet = await db.getWallet();
+    if (!wallet) {
+      return res.json({ success: true, data: null });
+    }
+    const balance = await stellar.getBalance(wallet.publicKey);
+    res.json({
+      success: true,
+      data: {
+        publicKey: wallet.publicKey,
+        balanceUsdc: balance.usdc,
+        balanceXlm: balance.xlm,
+        isFunded: wallet.isFunded,
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: msg });
   }
-  res.json({
-    success: true,
-    data: {
-      publicKey: wallet.publicKey,
-      balanceUsdc: wallet.balanceUsdc,
-      balanceXlm: wallet.balanceXlm,
-      isFunded: wallet.isFunded,
-    },
-  });
 });
 
 router.get('/details', async (_req, res) => {

@@ -108,10 +108,10 @@ interface ApiResult<T> {
 // Generic fetch (no fallbacks — errors propagate to caller)
 // ---------------------------------------------------------------------------
 
-async function request<T>(path: string, options?: RequestInit): Promise<ApiResult<T>> {
+async function request<T>(path: string, options?: RequestInit, timeoutMs = 3000): Promise<ApiResult<T>> {
   const url = `${cachedBaseUrl}${path}`;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(url, {
@@ -190,7 +190,7 @@ export const chatApi = {
     request<ChatMsg[]>('/chat'),
 
   send: (message: string) =>
-    request<ChatMsg[]>('/chat', { method: 'POST', body: JSON.stringify({ message }) }),
+    request<ChatMsg[]>('/chat', { method: 'POST', body: JSON.stringify({ message }) }, 25000),
 
   clear: () =>
     request<ChatMsg[]>('/chat', { method: 'DELETE' }),
