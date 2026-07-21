@@ -115,6 +115,11 @@ export async function createGoal(input: {
   return goalRow(data);
 }
 
+export async function deleteGoal(id: string): Promise<void> {
+  const { error } = await db().from('goals').delete().eq('id', id);
+  checkError(error, 'deleteGoal');
+}
+
 export async function updateGoal(id: string, updates: Partial<Goal>): Promise<Goal | null> {
   const dbUpdates: Record<string, any> = { updated_at: new Date().toISOString() };
   if (updates.savedAmountUgx !== undefined) dbUpdates.saved_amount_ugx = updates.savedAmountUgx;

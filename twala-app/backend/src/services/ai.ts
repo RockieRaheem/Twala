@@ -5,15 +5,11 @@ import * as kotani from './kotani.js';
 import config from '../config.js';
 import type { ChatMessage, AiContext } from '../types/index.js';
 
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
 const GEMINI_API_KEY = () => process.env.GEMINI_API_KEY || '';
 const GROQ_API_KEY = () => process.env.GROQ_API_KEY || '';
 
 // ---------------------------------------------------------------------------
-// Context builder (reads live data from DB + Stellar)
+// Context builder
 // ---------------------------------------------------------------------------
 
 async function buildContext(): Promise<AiContext> {
@@ -26,7 +22,7 @@ async function buildContext(): Promise<AiContext> {
     try {
       const b = await stellar.getBalance(wallet.publicKey);
       liveBalance = b.usdc;
-    } catch { /* use 0 */ }
+    } catch { /* 0 */ }
   }
 
   return {
@@ -69,18 +65,18 @@ function timeAgo(iso: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// System prompt — tells the AI it can ACT, not just talk
+// System prompt
 // ---------------------------------------------------------------------------
 
 function buildSystemPrompt(ctx: AiContext): string {
   const goalsText = ctx.goals.length > 0
     ? ctx.goals.map((g) => {
-        const milestoneText = g.milestones.length > 0
+        const msText = g.milestones.length > 0
           ? g.milestones.map((m) =>
               `    - "${m.title}" (${m.completed ? '✅ Done' : `⏳ Pending — ${fiat(m.targetAmountUgx)}`})`
             ).join('\n')
           : '    (no milestones)';
-        return `  - ID: "${g.id}"\n    Title: "${g.title}"\n    Saved: ${fiat(g.savedAmountUgx)} / ${fiat(g.targetAmountUgx)} (${percent(g.savedAmountUgx, g.targetAmountUgx)}%)\n    Status: ${g.status}\n    Target date: ${new Date(g.targetDate).toLocaleDateString()}\n    Milestones:\n${milestoneText}`;
+        return `  - ID: "${g.id}"\n    Title: "${g.title}"\n    Saved: ${fiat(g.savedAmountUgx)} / ${fiat(g.targetAmountUgx)} (${percent(g.savedAmountUgx, g.targetAmountUgx)}%)\n    Remaining: ${fiat(g.targetAmountUgx - g.savedAmountUgx)}\n    Status: ${g.status}\n    Milestones:\n${msText}`;
       }).join('\n')
     : '  (no savings goals yet)';
 
@@ -108,25 +104,28 @@ ${txText}
 
 You have the ability to EXECUTE actions on behalf of the user using function calls. When the user asks you to do something, DO IT using the available functions. Do NOT just tell them how — actually execute it.
 
-### Actions you can take:
-1. **create_goal** — Create a new savings goal (title, targetAmountUgx, category, description)
-2. **contribute_to_goal** — Add funds to an existing goal (goalId, amountUgx)
-3. **send_money** — Send USDC to someone in Uganda (amountUsdc, recipientName, recipientPhone, recipientNetwork, purpose)
+### Available Actions:
+1. **create_goal** — Create a new savings goal
+2. **contribute_to_goal** — Add funds to an existing goal (this also records a transaction)
+3. **send_money** — Send USDC to someone in Uganda via Mobile Money
+4. **update_goal** — Edit an existing goal's title, target, description, or milestones
+5. **delete_goal** — Delete a goal permanently
 
 ## Guidelines
-- When the user asks to create a goal, SEND the create_goal function call
-- When the user asks to add to a goal, SEND contribute_to_goal
-- When the user asks to send money, SEND send_money
-- After executing an action, explain what happened and the result
-- Use markdown formatting (**bold** for emphasis, ## for section headers)
-- Keep responses concise
-- REFERENCE ACTUAL DATA — never make up transactions, goals, or balances
-- Convert USDC to UGX at ~3,750 when discussing amounts
-- Be helpful and warm`;
+- When the user asks to create a goal, CALL create_goal immediately
+- When asked to add funds to a goal, CALL contribute_to_goal
+- When asked to send money, CALL send_money
+- When asked to edit/update a goal, CALL update_goal
+- When asked to remove/delete a goal, CALL delete_goal
+- After executing, explain what happened and the result clearly
+- Use markdown formatting
+- Always reference actual data — never fabricate
+- 1 USDC = 3,750 UGX (after 0.5% fee, min $0.50)
+- Be warm and helpful`;
 }
 
 // ---------------------------------------------------------------------------
-// Tool / Function definitions for Groq function calling
+// Tools (Groq function calling)
 // ---------------------------------------------------------------------------
 
 const TOOLS: any[] = [
@@ -134,14 +133,14 @@ const TOOLS: any[] = [
     type: 'function',
     function: {
       name: 'create_goal',
-      description: 'Create a new savings goal with a target amount in UGX',
+      description: 'Create a new savings goal',
       parameters: {
         type: 'object',
         properties: {
           title: { type: 'string', description: 'Goal title (e.g. "Buy Land in Wakiso")' },
           description: { type: 'string', description: 'Optional description' },
           targetAmountUgx: { type: 'number', description: 'Target amount in UGX' },
-          category: { type: 'string', enum: ['home', 'education', 'business', 'savings', 'land', 'other'], description: 'Goal category' },
+          category: { type: 'string', enum: ['home', 'education', 'business', 'savings', 'land', 'other'], description: 'Category' },
         },
         required: ['title', 'targetAmountUgx'],
       },
@@ -151,12 +150,12 @@ const TOOLS: any[] = [
     type: 'function',
     function: {
       name: 'contribute_to_goal',
-      description: 'Add funds to an existing savings goal and auto-complete milestones when reached',
+      description: 'Add funds to an existing savings goal',
       parameters: {
         type: 'object',
         properties: {
-          goalId: { type: 'string', description: 'The ID of the goal to contribute to' },
-          amountUgx: { type: 'number', description: 'Amount to add in UGX' },
+          goalId: { type: 'string', description: 'The goal ID to contribute to' },
+          amountUgx: { type: 'number', description: 'Amount in UGX' },
         },
         required: ['goalId', 'amountUgx'],
       },
@@ -166,24 +165,76 @@ const TOOLS: any[] = [
     type: 'function',
     function: {
       name: 'send_money',
-      description: 'Send USDC from the wallet to a recipient in Uganda via Mobile Money',
+      description: 'Send USDC to a recipient in Uganda via Mobile Money',
       parameters: {
         type: 'object',
         properties: {
-          amountUsdc: { type: 'number', description: 'Amount in USDC to send (min 10, max 5000)' },
+          amountUsdc: {
+            oneOf: [{ type: 'number' }, { type: 'string' }],
+            description: 'Amount in USDC (min 10, max 5000). Accepts number or string.',
+          },
           recipientName: { type: 'string', description: 'Recipient full name' },
-          recipientPhone: { type: 'string', description: 'Recipient phone number (e.g. +2567...)', default: '' },
-          recipientNetwork: { type: 'string', enum: ['MTN', 'AIRTEL'], description: 'Mobile network', default: 'MTN' },
-          purpose: { type: 'string', description: 'Purpose of the transfer (e.g. "Family Support", "Land Payment", "School Fees")' },
+          recipientPhone: { type: 'string', description: 'Phone (e.g. +256...)' },
+          recipientNetwork: {
+            type: 'string',
+            enum: ['MTN', 'AIRTEL'],
+            description: 'Mobile network: MTN or AIRTEL',
+          },
+          purpose: { type: 'string', description: 'Purpose (e.g. "Family Support", "Land Payment")' },
         },
         required: ['amountUsdc', 'recipientName', 'purpose'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_goal',
+      description: 'Update an existing goal (title, description, target amount, category, milestones, status)',
+      parameters: {
+        type: 'object',
+        properties: {
+          goalId: { type: 'string', description: 'The goal ID to update' },
+          title: { type: 'string', description: 'New title' },
+          description: { type: 'string', description: 'New description' },
+          targetAmountUgx: { type: 'number', description: 'New target amount in UGX' },
+          category: { type: 'string', enum: ['home', 'education', 'business', 'savings', 'land', 'other'], description: 'New category' },
+          status: { type: 'string', enum: ['active', 'completed', 'cancelled'], description: 'New status' },
+          milestones: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string' },
+                targetAmountUgx: { type: 'number' },
+                description: { type: 'string' },
+              },
+            },
+            description: 'Milestone list (replaces all milestones)',
+          },
+        },
+        required: ['goalId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_goal',
+      description: 'Delete a savings goal permanently',
+      parameters: {
+        type: 'object',
+        properties: {
+          goalId: { type: 'string', description: 'The goal ID to delete' },
+        },
+        required: ['goalId'],
       },
     },
   },
 ];
 
 // ---------------------------------------------------------------------------
-// Tool execution handlers
+// Tool execution
 // ---------------------------------------------------------------------------
 
 async function executeToolCall(toolCall: any): Promise<string> {
@@ -197,6 +248,7 @@ async function executeToolCall(toolCall: any): Promise<string> {
 
   try {
     switch (name) {
+      // ---------- create_goal ----------
       case 'create_goal': {
         const goal = await db.createGoal({
           title: args.title,
@@ -204,41 +256,59 @@ async function executeToolCall(toolCall: any): Promise<string> {
           targetAmountUgx: args.targetAmountUgx,
           category: args.category || 'other',
         });
-        const targetFormatted = fiat(goal.targetAmountUgx);
-        return `✅ Successfully created goal "${goal.title}" with target ${targetFormatted}. Goal ID: ${goal.id}. The user can now contribute towards it.`;
+        return `✅ Successfully created goal "${goal.title}" — target ${fiat(goal.targetAmountUgx)}. Goal ID: ${goal.id}`;
       }
 
+      // ---------- contribute_to_goal ----------
       case 'contribute_to_goal': {
         const goal = await db.contributeToGoal(args.goalId, args.amountUgx);
-        if (!goal) return `❌ Goal not found. ID: ${args.goalId}`;
+        if (!goal) return `❌ Goal not found: ${args.goalId}`;
+
+        // Record transaction
+        await db.createTransaction({
+          type: 'received',
+          amountUsdc: args.amountUgx / 3750,
+          amountUgx: args.amountUgx,
+          rate: 3750,
+          recipientName: `Contribution to ${goal.title}`,
+          purpose: 'Goal Contribution',
+          status: 'completed',
+          goalId: goal.id,
+        });
+
         const remaining = goal.targetAmountUgx - goal.savedAmountUgx;
         const pct = percent(goal.savedAmountUgx, goal.targetAmountUgx);
-        const completedCount = goal.milestones.filter((m: any) => m.completed).length;
-        const totalMilestones = goal.milestones.length;
-        let msg = `✅ Added ${fiat(args.amountUgx)} to "${goal.title}". Saved: ${fiat(goal.savedAmountUgx)} / ${fiat(goal.targetAmountUgx)} (${pct}%)`;
-        if (remaining > 0) msg += `. Remaining: ${fiat(remaining)}.`;
-        else msg += ` 🎉 Goal completed!`;
-        if (totalMilestones > 0) msg += ` Milestones: ${completedCount}/${totalMilestones} done.`;
+        const doneMs = goal.milestones.filter((m: any) => m.completed).length;
+        const totMs = goal.milestones.length;
+
+        let msg = `✅ Added ${fiat(args.amountUgx)} to "${goal.title}". Now ${fiat(goal.savedAmountUgx)} / ${fiat(goal.targetAmountUgx)} (${pct}%)`;
+        if (remaining > 0) msg += `. ${fiat(remaining)} remaining to reach your goal! 🎯`;
+        else msg += ` 🎉🎉 Goal fully funded! Congratulations!`;
+        if (totMs > 0) msg += ` Milestones: ${doneMs}/${totMs} completed.`;
         return msg;
       }
 
+      // ---------- send_money ----------
       case 'send_money': {
+        // Coerce amountUsdc from string to number if needed
+        const amountUsdc = typeof args.amountUsdc === 'string' ? parseFloat(args.amountUsdc) : args.amountUsdc;
+        if (isNaN(amountUsdc)) return `❌ Invalid amount: ${args.amountUsdc}`;
+
+        // Normalize network
+        const network = args.recipientNetwork?.toUpperCase() === 'AIRTEL' ? 'AIRTEL' : 'MTN';
+
         const wallet = await db.getWallet();
         if (!wallet) return '❌ No wallet found. Create a wallet first.';
 
         const balance = await stellar.getBalance(wallet.publicKey);
-        if (args.amountUsdc > balance.usdc) {
-          return `❌ Insufficient balance. You have ${usdc(balance.usdc)} USDC but trying to send ${usdc(args.amountUsdc)}.`;
+        if (amountUsdc > balance.usdc) {
+          return `❌ Insufficient balance. You have ${usdc(balance.usdc)} USDC but trying to send ${usdc(amountUsdc)}.`;
         }
-        if (args.amountUsdc < config.twala.minTransferUsdc) {
-          return `❌ Minimum transfer is ${config.twala.minTransferUsdc} USDC.`;
-        }
-        if (args.amountUsdc > config.twala.maxTransferUsdc) {
-          return `❌ Maximum transfer is ${config.twala.maxTransferUsdc} USDC.`;
-        }
+        if (amountUsdc < config.twala.minTransferUsdc) return `❌ Minimum transfer is ${config.twala.minTransferUsdc} USDC.`;
+        if (amountUsdc > config.twala.maxTransferUsdc) return `❌ Maximum transfer is ${config.twala.maxTransferUsdc} USDC.`;
 
         const rate = await getExchangeRate();
-        const quote = calculateQuote(args.amountUsdc, rate);
+        const quote = calculateQuote(amountUsdc, rate);
         const referenceId = `twala-ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
         let stellarTxHash = '';
@@ -263,14 +333,14 @@ async function executeToolCall(toolCall: any): Promise<string> {
           transactionHash: stellarTxHash,
         });
 
-        const tx = await db.createTransaction({
+        await db.createTransaction({
           type: 'sent',
           amountUsdc: quote.sendAmountUsdc,
           amountUgx: quote.receiveAmountUgx,
           rate: quote.rate,
           recipientName: args.recipientName,
           recipientPhone: args.recipientPhone || '',
-          recipientNetwork: (args.recipientNetwork as 'MTN' | 'AIRTEL') || 'MTN',
+          recipientNetwork: network,
           status: 'pending',
           purpose: args.purpose || 'Transfer',
           stellarTxHash,
@@ -278,7 +348,42 @@ async function executeToolCall(toolCall: any): Promise<string> {
           kotaniStatus: kotaniResult.data?.status || 'pending',
         });
 
-        return `✅ **Sent ${usdc(quote.sendAmountUsdc)} USDC to ${args.recipientName}!**\n- Delivery: ~${fiat(quote.receiveAmountUgx)} UGX via ${args.recipientNetwork || 'MTN'} Mobile Money\n- Fee: ${usdc(quote.feeUsdc)}\n- Reference: ${referenceId.slice(-8)}\n- Status: ${tx.status}\n\nThe money is on its way!`;
+        return `✅ **Sent ${usdc(quote.sendAmountUsdc)} to ${args.recipientName}!**\n- Delivery: ~${fiat(quote.receiveAmountUgx)} UGX via ${network}\n- Fee: ${usdc(quote.feeUsdc)}\n- Reference: ${referenceId.slice(-8)}`;
+      }
+
+      // ---------- update_goal ----------
+      case 'update_goal': {
+        const existing = await db.getGoal(args.goalId);
+        if (!existing) return `❌ Goal not found: ${args.goalId}`;
+
+        const updates: Record<string, any> = {};
+        if (args.title !== undefined) updates.title = args.title;
+        if (args.description !== undefined) updates.description = args.description;
+        if (args.targetAmountUgx !== undefined) updates.targetAmountUgx = args.targetAmountUgx;
+        if (args.category !== undefined) updates.category = args.category;
+        if (args.status !== undefined) updates.status = args.status;
+        if (args.milestones !== undefined) {
+          updates.milestones = args.milestones.map((m: any, i: number) => ({
+            id: existing.milestones[i]?.id || `ms-${Date.now()}-${i}`,
+            title: m.title,
+            targetAmountUgx: m.targetAmountUgx || 0,
+            description: m.description || '',
+            completed: existing.milestones[i]?.completed || false,
+            completedAt: existing.milestones[i]?.completedAt || undefined,
+          }));
+        }
+
+        const updated = await db.updateGoal(args.goalId, updates as any);
+        if (!updated) return `❌ Failed to update goal.`;
+        return `✅ Goal "${updated.title}" updated! Target: ${fiat(updated.targetAmountUgx)}, Saved: ${fiat(updated.savedAmountUgx)} (${percent(updated.savedAmountUgx, updated.targetAmountUgx)}%)`;
+      }
+
+      // ---------- delete_goal ----------
+      case 'delete_goal': {
+        const goal = await db.getGoal(args.goalId);
+        if (!goal) return `❌ Goal not found: ${args.goalId}`;
+        await db.deleteGoal(args.goalId);
+        return `✅ Goal "${goal.title}" has been deleted permanently.`;
       }
 
       default:
@@ -290,7 +395,7 @@ async function executeToolCall(toolCall: any): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Gemini provider (text-only, no tools)
+// Gemini (text-only)
 // ---------------------------------------------------------------------------
 
 function buildGeminiContents(history: ChatMessage[], userMessage: string): any[] {
@@ -329,23 +434,15 @@ async function callGemini(userMessage: string, ctx: AiContext, history: ChatMess
         }),
       }
     );
-
-    if (!response.ok) {
-      console.error(`Gemini API error: ${response.status}`, await response.text().catch(() => ''));
-      return null;
-    }
-
+    if (!response.ok) { console.error(`Gemini ${response.status}`, await response.text().catch(() => '')); return null; }
     const data: any = await response.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     return text?.trim() || null;
-  } catch (err) {
-    console.error('Gemini API call failed:', err);
-    return null;
-  }
+  } catch (err) { console.error('Gemini fail:', err); return null; }
 }
 
 // ---------------------------------------------------------------------------
-// Groq provider (with function calling / tool use)
+// Groq with function calling
 // ---------------------------------------------------------------------------
 
 async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessage[]): Promise<string | null> {
@@ -355,7 +452,6 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
   const messages: any[] = [
     { role: 'system', content: buildSystemPrompt(ctx) },
   ];
-
   for (const msg of history.slice(-20)) {
     messages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: msg.content });
   }
@@ -379,7 +475,12 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
     });
 
     if (!response.ok) {
-      console.error(`Groq API error: ${response.status}`, await response.text().catch(() => ''));
+      const body = await response.text().catch(() => '');
+      console.error(`Groq error ${response.status}:`, body);
+      // If it's a tool validation error, retry without tools
+      if (response.status === 400 && body.includes('tool call validation')) {
+        return await callGroqWithoutTools(key, messages);
+      }
       return null;
     }
 
@@ -387,30 +488,21 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
     const choice = data?.choices?.[0]?.message;
     if (!choice) return null;
 
-    // If no tool calls, return text directly
     if (!choice.tool_calls || choice.tool_calls.length === 0) {
       return choice.content?.trim() || null;
     }
 
-    // Execute all tool calls (can be multiple in one response)
+    // Execute tools
     const toolResults: string[] = [];
     for (const toolCall of choice.tool_calls) {
       const result = await executeToolCall(toolCall);
       toolResults.push(result);
-      messages.push({
-        role: 'assistant',
-        content: null,
-        tool_calls: [toolCall],
-      });
-      messages.push({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: result,
-      });
+      messages.push({ role: 'assistant', content: null, tool_calls: [toolCall] });
+      messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
     }
 
-    // Round 2: Send tool results back to get final response
-    const finalResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    // Round 2: Get final response
+    const finalRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
       signal: AbortSignal.timeout(30000),
@@ -423,22 +515,38 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
       }),
     });
 
-    if (!finalResponse.ok) {
-      // If the follow-up fails, return the tool results as the response
-      return toolResults.join('\n\n');
-    }
-
-    const finalData: any = await finalResponse.json();
-    const finalText = finalData?.choices?.[0]?.message?.content;
-    return finalText?.trim() || toolResults.join('\n\n');
+    if (!finalRes.ok) return toolResults.join('\n\n');
+    const finalData: any = await finalRes.json();
+    return finalData?.choices?.[0]?.message?.content?.trim() || toolResults.join('\n\n');
   } catch (err) {
-    console.error('Groq API call failed:', err);
+    console.error('Groq fail:', err);
     return null;
   }
 }
 
+// Fallback when tool validation fails
+async function callGroqWithoutTools(key: string, messages: any[]): Promise<string | null> {
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      signal: AbortSignal.timeout(30000),
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages,
+        temperature: 0.7,
+        max_tokens: 1024,
+        top_p: 0.95,
+      }),
+    });
+    if (!res.ok) return null;
+    const data: any = await res.json();
+    return data?.choices?.[0]?.message?.content?.trim() || null;
+  } catch { return null; }
+}
+
 // ---------------------------------------------------------------------------
-// Retry helper
+// Retry
 // ---------------------------------------------------------------------------
 
 async function withRetry<T>(fn: () => Promise<T | null>, retries = 2, delay = 1000): Promise<T | null> {
@@ -451,12 +559,11 @@ async function withRetry<T>(fn: () => Promise<T | null>, retries = 2, delay = 10
 }
 
 // ---------------------------------------------------------------------------
-// Log configured providers at startup
+// Startup log
 // ---------------------------------------------------------------------------
 
 const _geminiKeyAvailable = !!GEMINI_API_KEY();
 const _groqKeyAvailable = !!GROQ_API_KEY();
-
 console.log(`  AI      : ${_geminiKeyAvailable ? 'Gemini ✓' : 'Gemini ✗'} | ${_groqKeyAvailable ? 'Groq ✓' : 'Groq ✗'}`);
 
 // ---------------------------------------------------------------------------
@@ -469,21 +576,16 @@ export async function chat(userMessage: string): Promise<ChatMessage[]> {
 
   let reply: string | null = null;
 
-  // Groq with function calling
   if (_groqKeyAvailable) {
     reply = await withRetry(() => callGroq(userMessage, ctx, history), 1, 1500);
   }
-
-  // Gemini fallback (text-only)
   if (!reply && _geminiKeyAvailable) {
     reply = await withRetry(() => callGemini(userMessage, ctx, history), 1, 2000);
   }
-
   if (!reply) {
     throw new Error('AI service unavailable — no API keys configured or all providers failed');
   }
 
-  // Persist to DB
   await db.addChatMessage({ role: 'user', content: userMessage });
   await db.addChatMessage({ role: 'assistant', content: reply });
 

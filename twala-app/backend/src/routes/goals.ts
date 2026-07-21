@@ -32,6 +32,33 @@ router.post('/', async (req, res) => {
   res.json({ success: true, data: goal });
 });
 
+router.put('/:id', async (req, res) => {
+  const { title, description, targetAmountUgx, targetDate, category, milestones, status } = req.body;
+
+  const goal = await db.getGoal(req.params.id);
+  if (!goal) return res.status(404).json({ success: false, message: 'Goal not found' });
+
+  const updates: Record<string, any> = {};
+  if (title !== undefined) updates.title = title;
+  if (description !== undefined) updates.description = description;
+  if (targetAmountUgx !== undefined) updates.targetAmountUgx = targetAmountUgx;
+  if (targetDate !== undefined) updates.targetDate = targetDate;
+  if (category !== undefined) updates.category = category;
+  if (milestones !== undefined) updates.milestones = milestones;
+  if (status !== undefined) updates.status = status;
+
+  const updated = await db.updateGoal(req.params.id, updates as any);
+  res.json({ success: true, data: updated });
+});
+
+router.delete('/:id', async (req, res) => {
+  const goal = await db.getGoal(req.params.id);
+  if (!goal) return res.status(404).json({ success: false, message: 'Goal not found' });
+
+  await db.deleteGoal(req.params.id);
+  res.json({ success: true, message: 'Goal deleted' });
+});
+
 router.post('/:id/contribute', async (req, res) => {
   const { amountUgx } = req.body;
   if (!amountUgx || amountUgx <= 0) {
@@ -40,6 +67,18 @@ router.post('/:id/contribute', async (req, res) => {
 
   const goal = await db.contributeToGoal(req.params.id, amountUgx);
   if (!goal) return res.status(404).json({ success: false, message: 'Goal not found' });
+
+  // Record the contribution as a transaction
+  await db.createTransaction({
+    type: 'received',
+    amountUsdc: amountUgx / 3750,
+    amountUgx,
+    rate: 3750,
+    recipientName: `Contribution to ${goal.title}`,
+    purpose: 'Goal Contribution',
+    status: 'completed',
+    goalId: goal.id,
+  });
 
   res.json({ success: true, data: goal });
 });
