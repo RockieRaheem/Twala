@@ -1,4 +1,5 @@
 import * as db from './database.js';
+import * as stellar from './stellar.js';
 import type { ChatMessage, AiContext, Transaction } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
@@ -17,8 +18,17 @@ async function buildContext(): Promise<AiContext> {
   const goals = await db.getGoals();
   const { transactions } = await db.getTransactions({ limit: 10 });
 
+  // Fetch live USDC balance from Stellar (DB always stores 0)
+  let liveBalance = 0;
+  if (wallet?.publicKey) {
+    try {
+      const b = await stellar.getBalance(wallet.publicKey);
+      liveBalance = b.usdc;
+    } catch { /* use 0 */ }
+  }
+
   return {
-    walletBalance: wallet?.balanceUsdc || 0,
+    walletBalance: liveBalance,
     goals,
     recentTransactions: transactions,
     activeGoal: goals.find((g) => g.status === 'active') || undefined,
