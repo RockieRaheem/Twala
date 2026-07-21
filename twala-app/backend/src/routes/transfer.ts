@@ -7,6 +7,8 @@ import config from '../config.js';
 
 const router = Router();
 
+const KOTANI_ESCROW_ADDRESS = 'GA7Q5OQJ6X4G6T5ZVQ4Q3Z6H5KQ7R5QKZ6H5KQ7R5QKZ6H5KQ7R5QKZ6';
+
 // ---------------------------------------------------------------------------
 // GET /api/transfer/quote?amount=XXX
 // ---------------------------------------------------------------------------
@@ -47,7 +49,6 @@ router.post('/offramp', async (req, res) => {
   try {
     const { amountUsdc, recipientName, recipientPhone, recipientNetwork, purpose } = req.body;
 
-    // Validate
     const errors: string[] = [];
     if (!amountUsdc || amountUsdc <= 0) errors.push('Valid amountUsdc required');
     if (!recipientName || !recipientName.trim()) errors.push('recipientName required');
@@ -74,20 +75,24 @@ router.post('/offramp', async (req, res) => {
     const quote = calculateQuote(amountUsdc, rate);
     const referenceId = kotani.generateReferenceId();
 
-    // Step 1: Submit payment to Kotani Pay escrow on Stellar
+    // Step 1: Submit USDC payment to Kotani Pay escrow on Stellar
     let stellarTxHash = '';
-    const kotaniEscrowAddress = 'GA7Q5OQJ6X4G6T5ZVQ4Q3Z6H5KQ7R5QKZ6H5KQ7R5QKZ6H5KQ7R5QKZ6';
 
     try {
       await stellar.ensureTrustline(store.wallet.secretKey);
+
+      if (!stellar.isValidPublicKey(KOTANI_ESCROW_ADDRESS)) {
+        throw new Error('Invalid Kotani escrow address configured.');
+      }
+
       stellarTxHash = await stellar.submitPayment(
         store.wallet.secretKey,
-        kotaniEscrowAddress,
+        KOTANI_ESCROW_ADDRESS,
         quote.sendAmountUsdc.toFixed(7),
         referenceId
       );
     } catch (stellarErr) {
-      // Demo/simulation mode — generate mock hash
+      const msg = stellarErr instanceof Error ? stellarErr.message : String(stellarErr);
       stellarTxHash = `demo-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     }
 
@@ -159,10 +164,9 @@ router.post('/onramp', async (req, res) => {
     }
 
     const rate = await getExchangeRate();
-    const cryptoAmount = (fiatAmount / rate.usdcToUgx) * 0.98; // 2% fee
+    const cryptoAmount = (fiatAmount / rate.usdcToUgx) * 0.98;
     const referenceId = kotani.generateReferenceId();
 
-    // Submit onramp to Kotani Pay
     const kotaniResult = await kotani.createOnramp({
       referenceId,
       fiatAmount,
@@ -173,7 +177,6 @@ router.post('/onramp', async (req, res) => {
       network,
     });
 
-    // Create transaction record
     const tx = {
       id: `tx-${Date.now()}`,
       type: 'received' as const,
@@ -208,7 +211,7 @@ router.post('/onramp', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/transfer/status/:referenceId — Check Kotani Pay transfer status
+// GET /api/transfer/status/:referenceId
 // ---------------------------------------------------------------------------
 
 router.get('/status/:referenceId', async (req, res) => {
@@ -219,12 +222,10 @@ router.get('/status/:referenceId', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Transaction not found' });
     }
 
-    // Check with Kotani Pay
     const statusResult = tx.type === 'sent'
       ? await kotani.getOfframpStatus(referenceId)
       : await kotani.getOnrampStatus(referenceId);
 
-    // Update local status if Kotani reports completion
     if (statusResult.success && statusResult.data) {
       const kotaniStatus = statusResult.data.status;
       if (kotaniStatus === 'completed' && tx.status === 'pending') {
@@ -257,26 +258,19 @@ router.post('/webhook', (req, res) => {
     const payload: kotani.KotaniWebhookPayload = req.body;
     const signature = req.headers['x-kotani-signature'] as string;
 
-    // Verify signature
     if (!kotani.verifyWebhookSignature(payload, signature, config.kotani.apiKey)) {
       return res.status(401).json({ success: false, message: 'Invalid signature' });
     }
 
-    // Find and update transaction
     const tx = store.transactions.find((t) => t.kotaniReferenceId === payload.referenceId);
     if (tx) {
       if (payload.event.endsWith('.completed')) {
         tx.status = 'completed';
         tx.kotaniStatus = 'completed';
         if (payload.transactionHash) tx.stellarTxHash = payload.transactionHash;
-
-        // If offramp, also credit the user's wallet if needed
-        // (in production, Kotani escrow handles this)
       } else if (payload.event.endsWith('.failed')) {
         tx.status = 'failed';
         tx.kotaniStatus = 'failed';
-
-        // Refund logic — credit back wallet
         if (store.wallet && tx.type === 'sent') {
           store.wallet.balanceUsdc += tx.amountUsdc;
         }
@@ -291,7 +285,7 @@ router.post('/webhook', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/transfer/retry/:referenceId — Retry a failed Kotani Pay transfer
+// POST /api/transfer/retry/:referenceId
 // ---------------------------------------------------------------------------
 
 router.post('/retry/:referenceId', async (req, res) => {
@@ -309,7 +303,6 @@ router.post('/retry/:referenceId', async (req, res) => {
     tx.status = 'pending';
     tx.kotaniStatus = 'pending';
 
-    // Re-submit to Kotani
     if (tx.type === 'sent') {
       const kotaniResult = await kotani.createOfframp({
         referenceId: kotani.generateReferenceId(),
@@ -330,7 +323,7 @@ router.post('/retry/:referenceId', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/transfer/kotani-balance — Kotani Pay merchant balance
+// GET /api/transfer/kotani-balance
 // ---------------------------------------------------------------------------
 
 router.get('/kotani-balance', async (_req, res) => {

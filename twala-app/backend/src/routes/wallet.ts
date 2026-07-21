@@ -8,10 +8,23 @@ router.post('/create', async (_req, res) => {
   try {
     const wallet = await stellar.createWallet();
     await stellar.ensureTrustline(wallet.secretKey);
-    res.json({ success: true, data: { publicKey: wallet.publicKey, balanceUsdc: wallet.balanceUsdc, balanceXlm: wallet.balanceXlm } });
+    const freshBalance = await stellar.getBalance(wallet.publicKey);
+    if (store.wallet) {
+      store.wallet.balanceUsdc = freshBalance.usdc;
+      store.wallet.balanceXlm = freshBalance.xlm;
+    }
+    res.json({
+      success: true,
+      data: {
+        publicKey: wallet.publicKey,
+        balanceUsdc: freshBalance.usdc,
+        balanceXlm: freshBalance.xlm,
+        isFunded: wallet.isFunded,
+      },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: `Wallet creation failed: ${msg}` });
   }
 });
 
@@ -19,37 +32,107 @@ router.post('/restore', async (req, res) => {
   try {
     const { secretKey } = req.body;
     if (!secretKey) return res.status(400).json({ success: false, message: 'secretKey required' });
+
     const wallet = await stellar.restoreWallet(secretKey);
-    res.json({ success: true, data: { publicKey: wallet.publicKey, balanceUsdc: wallet.balanceUsdc, balanceXlm: wallet.balanceXlm } });
+    res.json({
+      success: true,
+      data: {
+        publicKey: wallet.publicKey,
+        balanceUsdc: wallet.balanceUsdc,
+        balanceXlm: wallet.balanceXlm,
+        isFunded: wallet.isFunded,
+      },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: `Wallet restoration failed: ${msg}` });
   }
 });
 
 router.get('/balance', async (_req, res) => {
   try {
-    if (!store.wallet) return res.json({ success: true, data: { balanceUsdc: 0, balanceXlm: 0 } });
+    if (!store.wallet) {
+      return res.json({
+        success: true,
+        data: { balanceUsdc: 0, balanceXlm: 0, publicKey: null, isFunded: false },
+      });
+    }
     const balance = await stellar.getBalance(store.wallet.publicKey);
     if (store.wallet) {
       store.wallet.balanceUsdc = balance.usdc;
       store.wallet.balanceXlm = balance.xlm;
     }
-    res.json({ success: true, data: { balanceUsdc: balance.usdc, balanceXlm: balance.xlm, publicKey: store.wallet.publicKey } });
+    res.json({
+      success: true,
+      data: {
+        balanceUsdc: balance.usdc,
+        balanceXlm: balance.xlm,
+        publicKey: store.wallet.publicKey,
+        isFunded: store.wallet.isFunded,
+      },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ success: false, message: msg });
+    res.status(500).json({ success: false, message: `Balance check failed: ${msg}` });
   }
 });
 
-router.get('/info', (_req, res) => {
-  if (!store.wallet) return res.json({ success: true, data: null });
+router.get('/info', async (_req, res) => {
+  if (!store.wallet) {
+    return res.json({ success: true, data: null });
+  }
   res.json({
     success: true,
     data: {
       publicKey: store.wallet.publicKey,
       balanceUsdc: store.wallet.balanceUsdc,
       balanceXlm: store.wallet.balanceXlm,
+      isFunded: store.wallet.isFunded,
+    },
+  });
+});
+
+router.get('/details', async (_req, res) => {
+  try {
+    if (!store.wallet) {
+      return res.json({ success: true, data: null });
+    }
+    const info = await stellar.getAccountInfo(store.wallet.publicKey);
+    res.json({ success: true, data: info });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: msg });
+  }
+});
+
+router.get('/payments', async (req, res) => {
+  try {
+    if (!store.wallet) {
+      return res.json({ success: true, data: { payments: [], cursor: '' } });
+    }
+    const limit = parseInt(req.query.limit as string) || 20;
+    const cursor = req.query.cursor as string | undefined;
+    const result = await stellar.getStellarPayments(store.wallet.publicKey, limit, cursor);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: msg });
+  }
+});
+
+router.get('/validate/:address', (req, res) => {
+  const isValid = stellar.isValidPublicKey(req.params.address);
+  res.json({ success: true, data: { address: req.params.address, isValid } });
+});
+
+router.post('/generate-keypair', (_req, res) => {
+  const keypair = stellar.generateKeypair();
+  res.json({
+    success: true,
+    data: {
+      publicKey: keypair.publicKey,
+      secretKey: keypair.secretKey,
+      message: 'Store this secret key securely. It will not be shown again.',
     },
   });
 });

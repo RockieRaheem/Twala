@@ -24,11 +24,14 @@ app.get('/api/health', (_req, res) => {
     data: {
       status: 'ok',
       stellarNetwork: config.stellar.network,
+      stellarHorizon: config.stellar.horizonUrl,
       walletExists: !!store.wallet,
       walletAddress: store.wallet?.publicKey || null,
+      walletFunded: store.wallet?.isFunded || false,
       goalsCount: store.goals.length,
       transactionsCount: store.transactions.length,
       kotaniConfigured: !!config.kotani.apiKey,
+      aiConfigured: !!process.env.GROQ_API_KEY || !!process.env.GEMINI_API_KEY,
     },
   });
 });
@@ -44,19 +47,31 @@ app.use('/api/kotani', kotaniRouter);
 app.listen(config.port, '0.0.0.0', () => {
   console.log(`\n  🏦 Twala Backend running`);
   console.log(`  ─────────────────────`);
-  console.log(`  Network : ${config.stellar.network} (${config.stellar.horizonUrl})`);
+  console.log(`  Network : ${config.stellar.network}`);
+  console.log(`  Horizon : ${config.stellar.horizonUrl}`);
   console.log(`  Port    : ${config.port}`);
-  console.log(`  Kotani  : ${config.kotani.apiKey ? 'Configured' : 'Demo mode (no key)'}`);
+  console.log(`  Kotani  : ${config.kotani.apiKey ? 'Configured ✓' : 'Demo mode'}`);
   console.log(`  Address : http://localhost:${config.port}`);
   console.log(`  API     : http://localhost:${config.port}/api/health\n`);
 
   // Create demo wallet on startup
   stellar.createWallet()
     .then(async (w) => {
-      await stellar.ensureTrustline(w.secretKey);
-      console.log(`  ✅ Demo wallet created: ${w.publicKey.slice(0, 8)}...`);
+      console.log(`  ✅ Wallet  : ${w.publicKey} ${w.isFunded ? '(funded via Friendbot)' : '(unfunded)'}`);
+      if (w.isFunded) {
+        try {
+          await stellar.ensureTrustline(w.secretKey);
+          console.log(`  ✅ Trustline: USDC trustline established`);
+        } catch (tlErr) {
+          const msg = tlErr instanceof Error ? tlErr.message : String(tlErr);
+          console.log(`  ⚠️  Trustline: ${msg}`);
+        }
+      }
+      const balance = await stellar.getBalance(w.publicKey);
+      console.log(`  💰 Balance : $${balance.usdc.toFixed(2)} USDC · ${balance.xlm.toFixed(2)} XLM`);
     })
-    .catch(() => {
-      console.log(`  ℹ️  Using in-memory demo wallet (no Stellar connection)`);
+    .catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`  ⚠️  Wallet  : ${msg}`);
     });
 });
