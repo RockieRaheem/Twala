@@ -132,10 +132,76 @@ const DEMO_TXS = [
   { name: 'Sarah', amount: 150, purpose: 'School Fees', status: 'pending' as const },
 ];
 
-function generateLocalResponse(userMsg: string): string {
+// Gemini API key from environment (exposed to client — acceptable for MVP)
+// Get a free key: https://aistudio.google.com/apikey
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
+
+function buildGeminiPrompt(userMsg: string): string {
+  const goalPct = Math.round((DEMO_GOAL.saved / DEMO_GOAL.target) * 100);
+  return `You are Kanzu, an AI financial companion for the Twala app. Twala helps people send money from the US to Uganda (USDC → Mobile Money) and save towards goals.
+
+Current user context (demo data for offline mode):
+- Wallet balance: ${formatUsdc(DEMO_BALANCE)} USDC
+- Savings goals:
+  - "${DEMO_GOAL.title}": ${formatFiat(DEMO_GOAL.saved)} / ${formatFiat(DEMO_GOAL.target)} (${goalPct}%), status: active
+- Recent transactions:
+  - Sent $250 to Maama (Family Support, completed)
+  - Sent $1,200 to Ssekandi (Construction Milestone, completed)
+  - Sent $150 to Sarah (School Fees, pending)
+
+Guidelines:
+- Respond in a warm, friendly, helpful tone
+- Use markdown formatting (**bold** for emphasis)
+- Keep responses concise (under 250 words unless detail requested)
+- When discussing amounts, convert USDC to UGX at ~3750 UGX per USDC (after fees)
+- Fee for sending money is 0.5% (min $0.50)
+- Be honest if you don't have specific data
+- Suggest relevant actions based on user context
+- Answer general financial questions intelligently
+- NEVER make up transactions, goals, or balances`;
+}
+
+async function callGeminiLocal(userMsg: string): Promise<string | null> {
+  if (!GEMINI_API_KEY) return null;
+  const systemPrompt = buildGeminiPrompt(userMsg);
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10000),
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: 'user', parts: [{ text: userMsg }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 512 },
+          safetySettings: [
+            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+          ],
+        }),
+      }
+    );
+    if (!res.ok) return null;
+    const data: any = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return text?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function generateLocalResponse(userMsg: string): Promise<string> {
+  // Try Gemini first if API key is configured
+  const geminiReply = await callGeminiLocal(userMsg);
+  if (geminiReply) return geminiReply;
+
+  // Fall back to rule-based responses
   const lower = userMsg.toLowerCase().trim();
 
-  // --- Greetings ---
   if (/^(hi|hello|hey|good\s*(morning|evening|afternoon)|yo|sup|howdy|greetings)$/i.test(lower)) {
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
@@ -143,24 +209,18 @@ function generateLocalResponse(userMsg: string): string {
     return `Good ${greeting}! I'm **Kanzu**, your AI financial companion.\n\nYou have **${formatUsdc(DEMO_BALANCE)}** available and your goal "${DEMO_GOAL.title}" is **${goalPct}% funded**.\n\nWhat can I help you with today?`;
   }
 
-  // --- Balance ---
   if (/(balance|how much|wallet|my money|what.*have|portfolio|net worth)/i.test(lower)) {
     const goalPct = Math.round((DEMO_GOAL.saved / DEMO_GOAL.target) * 100);
     return [
-      '## Financial Snapshot',
-      '',
-      `**Wallet**  ${formatUsdc(DEMO_BALANCE)} (USDC)`,
-      '',
+      '## Financial Snapshot', '',
+      `**Wallet**  ${formatUsdc(DEMO_BALANCE)} (USDC)`, '',
       `**Goals**  1 active`,
-      `• ${DEMO_GOAL.title}: ${formatFiat(DEMO_GOAL.saved)} / ${formatFiat(DEMO_GOAL.target)} (${goalPct}%)`,
-      '',
-      `**Recent Activity**  Sent $1,600 · Received $12.50`,
-      '',
+      `• ${DEMO_GOAL.title}: ${formatFiat(DEMO_GOAL.saved)} / ${formatFiat(DEMO_GOAL.target)} (${goalPct}%)`, '',
+      `**Recent Activity**  Sent \$1,600 · Received \$12.50`, '',
       'Want to see details on anything? Just ask!',
     ].join('\n');
   }
 
-  // --- Goal progress ---
   if (/(goal|progress|milestone|house|building|savings|project|home|land|wakiso|school|education)/i.test(lower)) {
     if (/(create|set.?up|new|start|add|open)/i.test(lower) && /(goal|savings|fund|target)/i.test(lower)) {
       return "Let's create a savings goal! Tell me:\n\n1️⃣ **What** are you saving for? (e.g., 'building a house', 'school fees')\n2️⃣ **How much** is the target? (e.g., 'UGX 150M', '30 million')\n3️⃣ **By when**? (optional)\n\nJust describe it in your own words!";
@@ -171,18 +231,14 @@ function generateLocalResponse(userMsg: string): string {
     return [
       `## ${DEMO_GOAL.title}`,
       `**Progress** ${pct}% (${formatFiat(DEMO_GOAL.saved)} of ${formatFiat(DEMO_GOAL.target)})`,
-      `**Remaining** ${formatFiat(remaining)}`,
-      '',
+      `**Remaining** ${formatFiat(remaining)}`, '',
       '**Next Milestone**: Roofing',
-      'Target: UGX 35M — Roof installation and ceiling',
-      '',
-      `📅 At **${formatFiat(monthly)}/month**, you'll complete this goal in **6 months**.`,
-      '',
+      'Target: UGX 35M — Roof installation and ceiling', '',
+      `📅 At **${formatFiat(monthly)}/month**, you'll complete this goal in **6 months**.`, '',
       'Want to contribute now? Just tell me an amount like "Add 500K UGX".',
     ].join('\n');
   }
 
-  // --- Send money ---
   if (/(send|transfer|remit|pay|wire)/i.test(lower)) {
     const amtMatch = lower.match(/(\d+(?:\.\d+)?)/);
     if (amtMatch) {
@@ -195,19 +251,16 @@ function generateLocalResponse(userMsg: string): string {
       return `## Send Money Preview\n\n**Amount**: ${formatUsdc(amt)}\n**Fee**: ${formatUsdc(fee)} (0.5%)\n**Est. Delivery**: 1-2 minutes to MTN Mobile Money\n**Recipient Gets**: ~${formatFiat(Math.round(receive))}\n\nTo proceed, confirm the recipient's **full name** and **phone number**.`;
     }
     return [
-      'I can help you send money to Uganda! 🇺🇬',
-      '',
+      'I can help you send money to Uganda! 🇺🇬', '',
       '**How it works:**',
       '💸 USDC on Stellar → MTN/Airtel Mobile Money',
       '⚡ 1-2 minutes delivery',
-      '💵 0.5% fee (min $0.50)',
-      '',
+      '💵 0.5% fee (min $0.50)', '',
       'Tell me: **who** do you want to send to and **how much**?',
       'e.g., "Send $200 to Mama"',
     ].join('\n');
   }
 
-  // --- History ---
   if (/(history|recent|transactions|activity|past)/i.test(lower)) {
     const lines = ['## Recent Transactions'];
     for (const tx of DEMO_TXS) {
@@ -220,7 +273,6 @@ function generateLocalResponse(userMsg: string): string {
     return lines.join('\n');
   }
 
-  // --- Exchange rate ---
   if (/(rate|exchange|ugx|conversion)/i.test(lower)) {
     const amtMatch = lower.match(/(\d+(?:\.\d+)?)/);
     if (amtMatch) {
@@ -231,36 +283,29 @@ function generateLocalResponse(userMsg: string): string {
     return "## Exchange Rate (Live)\n\n**1 USDC** → **UGX 3,750**\n**1 USD** → **UGX 3,750**\n\nWant to calculate a specific amount? Just say: 'How much is $250 in UGX?'";
   }
 
-  // --- Help ---
   if (/(help|what can you do|capabilities|features|how)/i.test(lower)) {
     return [
-      '## How I Can Help You',
-      '',
+      '## How I Can Help You', '',
       '💸 **Send Money** — "Send $200 to Mama"',
       '🏠 **Goal Progress** — "How\'s my building project?"',
       '🎯 **Create Goal** — "Help me save for land"',
       '💰 **Check Balance** — "How much do I have?"',
       '📋 **Transactions** — "Show recent activity"',
-      '💱 **Exchange Rate** — "What\'s the current rate?"',
-      '',
+      '💱 **Exchange Rate** — "What\'s the current rate?"', '',
       'Just tell me what you need in plain English! 👇',
     ].join('\n');
   }
 
-  // --- Thank you / affirmations ---
   if (/(thank|thanks|ok|okay|sure|yes|yeah|great|nice|perfect)/i.test(lower)) {
     return "You're welcome! 😊 Anything else I can help you with?";
   }
 
-  // --- Ambiguous fallback ---
   return [
-    "I want to make sure I understand. Could you rephrase? Here are some things I can help with:",
-    '',
+    "I want to make sure I understand. Could you rephrase? Here are some things I can help with:", '',
     '• **What is my balance?**',
     '• **How is my building project doing?**',
     '• **Send money to Uganda**',
-    '• **What can you do?**',
-    '',
+    '• **What can you do?**', '',
     'Or just tell me in your own words!',
   ].join('\n');
 }
@@ -280,7 +325,7 @@ function getLocalSuggestions(): string[] {
 // Generic fetch with fallback
 // ---------------------------------------------------------------------------
 
-async function request<T>(path: string, options?: RequestInit, fallback?: () => T): Promise<ApiResult<T>> {
+async function request<T>(path: string, options?: RequestInit, fallback?: () => T | Promise<T>): Promise<ApiResult<T>> {
   const url = `${cachedBaseUrl}${path}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
@@ -300,7 +345,7 @@ async function request<T>(path: string, options?: RequestInit, fallback?: () => 
     notifyListeners(false);
     // Use fallback data if provided
     if (fallback) {
-      const data = fallback();
+      const data = await fallback();
       return { success: true, data };
     }
     return {
@@ -477,9 +522,9 @@ export const chatApi = {
     request<ChatMsg[]>('/chat', {}, () => [...localChatHistory]),
 
   send: (message: string) =>
-    request<ChatMsg[]>('/chat', { method: 'POST', body: JSON.stringify({ message }) }, () => {
+    request<ChatMsg[]>('/chat', { method: 'POST', body: JSON.stringify({ message }) }, async () => {
       const userMsg: ChatMsg = { role: 'user', content: message, timestamp: new Date().toISOString() };
-      const aiResponse = generateLocalResponse(message);
+      const aiResponse = await generateLocalResponse(message);
       const assistantMsg: ChatMsg = { role: 'assistant', content: aiResponse, timestamp: new Date().toISOString() };
       localChatHistory.push(userMsg, assistantMsg);
       if (localChatHistory.length > 50) localChatHistory = localChatHistory.slice(-50);

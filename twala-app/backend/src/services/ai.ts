@@ -3,6 +3,13 @@ import type { ChatMessage, AiContext, Goal, Transaction } from '../types/index.j
 import { getExchangeRate } from './rates.js';
 
 // ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+const GEMINI_API_KEY = () => process.env.GEMINI_API_KEY || '';
+const GROQ_API_KEY = () => process.env.GROQ_API_KEY || '';
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -33,7 +40,7 @@ interface ConversationState {
 }
 
 // ---------------------------------------------------------------------------
-// Conversation memory
+// Conversation memory (only used by rule-based fallback)
 // ---------------------------------------------------------------------------
 
 let convState: ConversationState = {
@@ -92,7 +99,158 @@ function timeAgo(iso: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Intent classifier — multi-pass with entity extraction
+// LLM-based response via Gemini (primary) / Groq (fallback)
+// ---------------------------------------------------------------------------
+
+function buildSystemPrompt(ctx: AiContext): string {
+  const goalsText = ctx.goals.length > 0
+    ? ctx.goals.map((g) =>
+        `- "${g.title}": ${fiat(g.savedAmountUgx)} / ${fiat(g.targetAmountUgx)} (${percent(g.savedAmountUgx, g.targetAmountUgx)}%), status: ${g.status}`
+      ).join('\n')
+    : 'No savings goals yet.';
+
+  const txText = ctx.recentTransactions.length > 0
+    ? ctx.recentTransactions.slice(0, 5).map((t) =>
+        `- ${t.type === 'sent' ? 'Sent' : 'Received'} ${usdc(t.amountUsdc)} ${t.type === 'sent' ? 'to' : 'from'} ${t.recipientName} (${t.purpose}, ${t.status})`
+      ).join('\n')
+    : 'No recent transactions.';
+
+  return `You are Kanzu, an AI financial companion for the Twala app. Twala helps people send money from the US to Uganda (USDC → Mobile Money) and save towards goals.
+
+Current user context:
+- Wallet balance: ${usdc(ctx.walletBalance)} USDC
+- Savings goals:
+${goalsText}
+- Recent transactions:
+${txText}
+
+Guidelines:
+- Respond in a warm, friendly, helpful tone
+- Use markdown formatting (**bold** for emphasis)
+- Keep responses concise (under 250 words unless detail is requested)
+- When discussing amounts, convert USDC to UGX at ~3750 UGX per USDC (after fees)
+- The fee for sending money is 0.5% (min $0.50)
+- If the user asks about something you don't have data for, be honest and suggest what they can do
+- Proactively suggest relevant actions based on the user's context
+- You CAN answer general financial questions intelligently
+- NEVER make up transactions, goals, or balances — only reference actual data from the context above
+- If the user wants to perform an action (send money, create goal, etc.), guide them through it step by step`;
+}
+
+function buildContents(history: ChatMessage[], userMessage: string): any[] {
+  const contents: any[] = [];
+
+  for (const msg of history.slice(-20)) {
+    contents.push({
+      role: msg.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: msg.content }],
+    });
+  }
+
+  contents.push({
+    role: 'user',
+    parts: [{ text: userMessage }],
+  });
+
+  return contents;
+}
+
+async function callGemini(userMessage: string, ctx: AiContext, history: ChatMessage[]): Promise<string | null> {
+  const key = GEMINI_API_KEY();
+  if (!key) return null;
+
+  const systemPrompt = buildSystemPrompt(ctx);
+  const contents = buildContents(history, userMessage);
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(15000),
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents,
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1024,
+            topP: 0.95,
+            topK: 40,
+          },
+          safetySettings: [
+            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+          ],
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      console.error(`Gemini API error: ${response.status}`, await response.text().catch(() => ''));
+      return null;
+    }
+
+    const data: any = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return text?.trim() || null;
+  } catch (err) {
+    console.error('Gemini API call failed:', err);
+    return null;
+  }
+}
+
+async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessage[]): Promise<string | null> {
+  const key = GROQ_API_KEY();
+  if (!key) return null;
+
+  const systemPrompt = buildSystemPrompt(ctx);
+
+  const messages: any[] = [
+    { role: 'system', content: systemPrompt },
+  ];
+
+  for (const msg of history.slice(-20)) {
+    messages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: msg.content });
+  }
+
+  messages.push({ role: 'user', content: userMessage });
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+      },
+      signal: AbortSignal.timeout(15000),
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages,
+        temperature: 0.7,
+        max_tokens: 1024,
+        top_p: 0.95,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`Groq API error: ${response.status}`, await response.text().catch(() => ''));
+      return null;
+    }
+
+    const data: any = await response.json();
+    const text = data?.choices?.[0]?.message?.content;
+    return text?.trim() || null;
+  } catch (err) {
+    console.error('Groq API call failed:', err);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rule-based intent classifier (fallback when no LLM available)
 // ---------------------------------------------------------------------------
 
 function classifyIntent(input: string, ctx: AiContext): IntentResult {
@@ -192,7 +350,6 @@ function classifyIntent(input: string, ctx: AiContext): IntentResult {
 // ---------------------------------------------------------------------------
 
 function parseUsdcAmount(text: string): number | null {
-  // $200, 200 USD, 200 usdc, 200$
   const patterns = [
     /\$(\d+(?:\.\d+)?)/,
     /(\d+(?:\.\d+)?)\s*(usdc|usd|\$)/i,
@@ -206,7 +363,6 @@ function parseUsdcAmount(text: string): number | null {
 }
 
 function parseUgxAmount(text: string): number | null {
-  // 500k, 1.5M, UGX 500000, 500000 UGX
   const patterns = [
     /ugx\s*([\d,.]+)/i,
     /([\d,.]+)\s*ugx/i,
@@ -228,17 +384,15 @@ function parseUgxAmount(text: string): number | null {
 }
 
 function extractRecipient(text: string): string | null {
-  // "send $200 to mama" -> "mama"
   const m = text.match(/(?:to|for)\s+(\w+(?:\s+\w+){0,2})$/i);
   if (m) return m[1].trim();
-  // "send mama $200"
   const m2 = text.match(/(?:send|pay|transfer)\s+(\w+(?:\s+\w+){0,2})\s/i);
   if (m2) return m2[1].trim();
   return null;
 }
 
 // ---------------------------------------------------------------------------
-// Response builders (template-based, data-rich)
+// Rule-based response builders (fallback when no LLM available)
 // ---------------------------------------------------------------------------
 
 function respondGreet(ctx: AiContext): string {
@@ -324,7 +478,6 @@ function respondGoalProgress(ctx: AiContext, goalId?: string): string {
 }
 
 function respondGoalCreate(ctx: AiContext, raw?: string): string {
-  // Try to extract goal info from raw text
   if (raw) {
     const titleMatch = raw.match(/(?:save|saving)\s+(?:for|toward(?:ds)?)?\s*(.+?)(?:\s*for\s*\d+|$)/i)
       || raw.match(/(?:create|set|start|new)\s*(?:a\s*)?(?:goal|savings|fund)\s*(?:for|to\s*buy|to\s*build|called)?\s*(.+?)$/i);
@@ -349,7 +502,6 @@ function respondGoalContribute(ctx: AiContext, amountUgx?: number): string {
     return `How much would you like to add to **${goal.title}**? (Current: ${fiat(goal.savedAmountUgx)} of ${fiat(goal.targetAmountUgx)})`;
   }
 
-  // Simulate contribution
   const newSaved = goal.savedAmountUgx + amountUgx;
   const newPct = percent(newSaved, goal.targetAmountUgx);
   const usdcAmount = amountUgx / 3750;
@@ -424,12 +576,10 @@ function respondHelp(): string {
 function respondProactiveTip(ctx: AiContext): string {
   const tips: string[] = [];
 
-  // Low balance warning
   if (ctx.walletBalance > 0 && ctx.walletBalance < 50) {
     tips.push(`⚠️ Your wallet is running low (${usdc(ctx.walletBalance)}). Consider topping up.`);
   }
 
-  // Goal approaching deadline
   for (const g of ctx.goals) {
     if (g.status !== 'active') continue;
     const targetDate = new Date(g.targetDate);
@@ -441,7 +591,6 @@ function respondProactiveTip(ctx: AiContext): string {
     }
   }
 
-  // Recent failed transaction
   const failed = ctx.recentTransactions.find((t) => t.status === 'failed');
   if (failed) {
     tips.push(`❌ A recent transfer to **${failed.recipientName}** (${usdc(failed.amountUsdc)}) failed. Would you like to retry?`);
@@ -455,7 +604,7 @@ function respondProactiveTip(ctx: AiContext): string {
 }
 
 // ---------------------------------------------------------------------------
-// Main response dispatch
+// Rule-based dispatch (fallback)
 // ---------------------------------------------------------------------------
 
 async function dispatch(intent: IntentResult, ctx: AiContext): Promise<string> {
@@ -518,7 +667,6 @@ async function dispatch(intent: IntentResult, ctx: AiContext): Promise<string> {
 
     default: {
       convState.pendingAction = null;
-      // Ambiguous — offer contextual suggestions
       const suggestions: string[] = [];
       if (ctx.walletBalance > 0) suggestions.push('What is my balance?');
       if (ctx.goals.length > 0) suggestions.push(`How is "${ctx.goals[0].title}" doing?`);
@@ -537,13 +685,28 @@ async function dispatch(intent: IntentResult, ctx: AiContext): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Public API — tries Gemini first, then Groq, then rule-based fallback
 // ---------------------------------------------------------------------------
 
 export async function chat(userMessage: string): Promise<ChatMessage[]> {
   const ctx = buildContext();
-  const intent = classifyIntent(userMessage, ctx);
-  const reply = await dispatch(intent, ctx);
+  const history = store.chatHistory;
+
+  let reply: string | null = null;
+
+  // Try Gemini (primary LLM)
+  reply = await callGemini(userMessage, ctx, history);
+
+  // Try Groq (secondary LLM)
+  if (!reply) {
+    reply = await callGroq(userMessage, ctx, history);
+  }
+
+  // Fall back to rule-based engine
+  if (!reply) {
+    const intent = classifyIntent(userMessage, ctx);
+    reply = await dispatch(intent, ctx);
+  }
 
   store.chatHistory.push({
     role: 'user',
