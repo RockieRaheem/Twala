@@ -2,7 +2,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Image,
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
-import { chatApi, type ChatMsg } from '../services/api';
+import { chatApi, isBackendOnline, type ChatMsg } from '../services/api';
 
 function TypingDots() {
   const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
@@ -132,9 +132,11 @@ export default function AIAssistant() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [localMode, setLocalMode] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   const loadData = useCallback(async () => {
+    setLocalMode(!isBackendOnline());
     const [chatRes, sugRes] = await Promise.all([chatApi.list(), chatApi.suggestions()]);
     if (chatRes.success && chatRes.data) setMessages(chatRes.data);
     if (sugRes.success && sugRes.data) setSuggestions(sugRes.data);
@@ -155,8 +157,9 @@ export default function AIAssistant() {
     setMessage('');
     setIsTyping(true);
     setError(null);
+    setLocalMode(!isBackendOnline());
     const [chatRes, sugRes] = await Promise.all([chatApi.send(userMsg), chatApi.suggestions()]);
-    if (chatRes.success && chatRes.data) setMessages(chatRes.data);
+    if (chatRes.success && chatRes.data && Array.isArray(chatRes.data) && chatRes.data.length > 0) setMessages(chatRes.data);
     else setError('Failed to send message. Please try again.');
     if (sugRes.success && sugRes.data) setSuggestions(sugRes.data);
     setIsTyping(false);
@@ -176,7 +179,7 @@ export default function AIAssistant() {
           <View>
             <Text style={styles.headerTitle}>Kanzu</Text>
             <Text style={styles.headerSub}>
-              {isTyping ? 'Thinking...' : 'Online • AI Financial Companion'}
+              {isTyping ? 'Thinking...' : localMode ? 'Local AI • Offline Mode' : 'Online • AI Financial Companion'}
             </Text>
           </View>
         </View>
