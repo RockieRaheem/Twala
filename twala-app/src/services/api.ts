@@ -43,6 +43,16 @@ function notifyListeners(online: boolean) {
 }
 
 // ---------------------------------------------------------------------------
+// Change notification — lets chat signal dashboard to refresh
+// ---------------------------------------------------------------------------
+
+let _changeCounter = 0;
+
+export function notifyChange() { _changeCounter++; }
+
+export function getChangeCounter() { return _changeCounter; }
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 

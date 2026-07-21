@@ -2,7 +2,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Animat
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
-import { chatApi, isBackendOnline, type ChatMsg } from '../services/api';
+import { chatApi, isBackendOnline, notifyChange, type ChatMsg } from '../services/api';
 
 function TypingDots() {
   const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
@@ -159,8 +159,10 @@ export default function AIAssistant() {
     setError(null);
     setLocalMode(!isBackendOnline());
     const [chatRes, sugRes] = await Promise.all([chatApi.send(userMsg), chatApi.suggestions()]);
-    if (chatRes.success && chatRes.data && Array.isArray(chatRes.data) && chatRes.data.length > 0) setMessages(chatRes.data);
-    else setError('Failed to send message. Please try again.');
+    if (chatRes.success && chatRes.data && Array.isArray(chatRes.data) && chatRes.data.length > 0) {
+      setMessages(chatRes.data);
+      notifyChange();
+    } else setError('Failed to send message. Please try again.');
     if (sugRes.success && sugRes.data) setSuggestions(sugRes.data);
     setIsTyping(false);
   };

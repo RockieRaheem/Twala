@@ -3,7 +3,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useState, useCallback, useEffect } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 import type { AppScreen } from '../components/BottomNavBar';
-import { walletApi, ratesApi, historyApi, goalsApi, type GoalData } from '../services/api';
+import { walletApi, ratesApi, historyApi, goalsApi, getChangeCounter, type GoalData } from '../services/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -60,6 +60,7 @@ export default function HomeDashboard({ onNavigate, onNavigateGoal }: { onNaviga
   const [recentTxs, setRecentTxs] = useState<any[]>([]);
   const [ratePairs, setRatePairs] = useState<{ from: string; to: string }[]>([]);
   const [rateIndex, setRateIndex] = useState(0);
+  const [changeVer, setChangeVer] = useState(0);
 
   const fetchData = useCallback(() => {
     setError(null);
@@ -92,6 +93,18 @@ export default function HomeDashboard({ onNavigate, onNavigateGoal }: { onNaviga
   }, []);
 
   useEffect(() => { fetchData(); }, []);
+
+  // Poll for AI-triggered changes every 2s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const latest = getChangeCounter();
+      if (latest !== changeVer) {
+        setChangeVer(latest);
+        fetchData();
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [changeVer, fetchData]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
