@@ -10,7 +10,6 @@ import {
 } from '@stellar/stellar-sdk';
 import config from '../config.js';
 import type { WalletInfo, Transaction, StellarPayment, StellarAccountInfo, StellarFeeStats, StellarTrustline } from '../types/index.js';
-import { store } from '../store.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -350,7 +349,6 @@ export async function createWallet(): Promise<WalletInfo> {
     isFunded,
   };
 
-  store.wallet = wallet;
   return wallet;
 }
 
@@ -642,7 +640,6 @@ export async function restoreWallet(secretKey: string): Promise<WalletInfo> {
     isFunded,
   };
 
-  store.wallet = wallet;
   return wallet;
 }
 

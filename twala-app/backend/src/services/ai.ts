@@ -21,7 +21,7 @@ async function buildContext(): Promise<AiContext> {
     walletBalance: wallet?.balanceUsdc || 0,
     goals,
     recentTransactions: transactions,
-    activeGoal: goals.find((g) => g.status === 'active') || null,
+    activeGoal: goals.find((g) => g.status === 'active') || undefined,
   };
 }
 
