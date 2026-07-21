@@ -8,6 +8,12 @@ import type { ChatMessage, AiContext } from '../types/index.js';
 const GEMINI_API_KEY = () => process.env.GEMINI_API_KEY || '';
 const GROQ_API_KEY = () => process.env.GROQ_API_KEY || '';
 
+const KOTANI_ESCROW_ADDRESS = 'GA7Q5OQJ6X4G6T5ZVQ4Q3Z6H5KQ7R5QKZ6H5KQ7R5QKZ6H5KQ7R5QKZ6';
+
+const GROQ_MODELS = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile'];
+
+let _pendingNavigate: { screen: string; goalId?: string } | null = null;
+
 // ---------------------------------------------------------------------------
 // Context builder
 // ---------------------------------------------------------------------------
@@ -110,6 +116,7 @@ You have the ability to EXECUTE actions on behalf of the user using function cal
 3. **send_money** — Send USDC to someone in Uganda via Mobile Money
 4. **update_goal** — Edit an existing goal's title, target, description, or milestones
 5. **delete_goal** — Delete a goal permanently
+6. **navigate** — Navigate/redirect the user to a specific screen in the app
 
 ## Guidelines
 - When the user asks to create a goal, CALL create_goal immediately
@@ -117,6 +124,7 @@ You have the ability to EXECUTE actions on behalf of the user using function cal
 - When asked to send money, CALL send_money
 - When asked to edit/update a goal, CALL update_goal
 - When asked to remove/delete a goal, CALL delete_goal
+- When the user wants to go to a specific screen (like their goals list, dashboard, transfer page, history, or a specific goal detail), CALL navigate immediately
 - After executing, explain what happened and the result clearly
 - Use markdown formatting
 - Always reference actual data — never fabricate
@@ -231,6 +239,28 @@ const TOOLS: any[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'navigate',
+      description: 'Navigate/redirect the user to a specific screen in the app',
+      parameters: {
+        type: 'object',
+        properties: {
+          screen: {
+            type: 'string',
+            enum: ['Dashboard', 'Goals', 'Transfer', 'History', 'GoalDetail'],
+            description: 'The screen to navigate to',
+          },
+          goalId: {
+            type: 'string',
+            description: 'Goal ID (required only when screen is GoalDetail)',
+          },
+        },
+        required: ['screen'],
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -264,7 +294,6 @@ async function executeToolCall(toolCall: any): Promise<string> {
         const goal = await db.contributeToGoal(args.goalId, args.amountUgx);
         if (!goal) return `❌ Goal not found: ${args.goalId}`;
 
-        // Record transaction
         await db.createTransaction({
           type: 'received',
           amountUsdc: args.amountUgx / 3750,
@@ -290,11 +319,9 @@ async function executeToolCall(toolCall: any): Promise<string> {
 
       // ---------- send_money ----------
       case 'send_money': {
-        // Coerce amountUsdc from string to number if needed
         const amountUsdc = typeof args.amountUsdc === 'string' ? parseFloat(args.amountUsdc) : args.amountUsdc;
         if (isNaN(amountUsdc)) return `❌ Invalid amount: ${args.amountUsdc}`;
 
-        // Normalize network
         const network = args.recipientNetwork?.toUpperCase() === 'AIRTEL' ? 'AIRTEL' : 'MTN';
 
         const wallet = await db.getWallet();
@@ -311,19 +338,22 @@ async function executeToolCall(toolCall: any): Promise<string> {
         const quote = calculateQuote(amountUsdc, rate);
         const referenceId = `twala-ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+        // Submit USDC payment to Kotani Pay escrow on Stellar
         let stellarTxHash = '';
         try {
           await stellar.ensureTrustline(wallet.secretKey);
           stellarTxHash = await stellar.submitPayment(
             wallet.secretKey,
-            'GA7Q5OQJ6X4G6T5ZVQ4Q3Z6H5KQ7R5QKZ6H5KQ7R5QKZ6H5KQ7R5QKZ6',
+            KOTANI_ESCROW_ADDRESS,
             quote.sendAmountUsdc.toFixed(7),
             referenceId
           );
-        } catch {
+        } catch (stellarErr) {
+          const msg = stellarErr instanceof Error ? stellarErr.message : String(stellarErr);
           stellarTxHash = `demo-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         }
 
+        // Submit offramp request to Kotani Pay
         const kotaniResult = await kotani.createOfframp({
           referenceId,
           cryptoAmount: quote.sendAmountUsdc,
@@ -333,6 +363,7 @@ async function executeToolCall(toolCall: any): Promise<string> {
           transactionHash: stellarTxHash,
         });
 
+        // Record transaction in DB
         await db.createTransaction({
           type: 'sent',
           amountUsdc: quote.sendAmountUsdc,
@@ -384,6 +415,12 @@ async function executeToolCall(toolCall: any): Promise<string> {
         if (!goal) return `❌ Goal not found: ${args.goalId}`;
         await db.deleteGoal(args.goalId);
         return `✅ Goal "${goal.title}" has been deleted permanently.`;
+      }
+
+      // ---------- navigate ----------
+      case 'navigate': {
+        _pendingNavigate = { screen: args.screen, goalId: args.goalId };
+        return `__NAVIGATE__:{"screen":"${args.screen}"${args.goalId ? `,"goalId":"${args.goalId}"` : ''}}`;
       }
 
       default:
@@ -442,13 +479,29 @@ async function callGemini(userMessage: string, ctx: AiContext, history: ChatMess
 }
 
 // ---------------------------------------------------------------------------
-// Groq with function calling
+// Groq with function calling (tries multiple models on rate-limit errors)
 // ---------------------------------------------------------------------------
 
-async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessage[]): Promise<string | null> {
+async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessage[]): Promise<{ content: string | null; toolResults: string[] }> {
   const key = GROQ_API_KEY();
-  if (!key) return null;
+  if (!key) return { content: null, toolResults: [] };
 
+  for (const model of GROQ_MODELS) {
+    const result = await tryGroqWithModel(model, key, userMessage, ctx, history);
+    if (result.content !== null || result.toolResults.length > 0) return result;
+    console.warn(`  Groq model ${model} exhausted, trying next...`);
+  }
+
+  return { content: null, toolResults: [] };
+}
+
+async function tryGroqWithModel(
+  model: string,
+  key: string,
+  userMessage: string,
+  ctx: AiContext,
+  history: ChatMessage[],
+): Promise<{ content: string | null; toolResults: string[] }> {
   const messages: any[] = [
     { role: 'system', content: buildSystemPrompt(ctx) },
   ];
@@ -457,14 +510,15 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
   }
   messages.push({ role: 'user', content: userMessage });
 
+  const defaultResult = { content: null, toolResults: [] };
+
   try {
-    // Round 1: Send with tools
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
       signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model,
         messages,
         tools: TOOLS,
         tool_choice: 'auto',
@@ -476,23 +530,28 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      console.error(`Groq error ${response.status}:`, body);
-      // If it's a tool validation error, retry without tools
+      console.error(`Groq ${model} error ${response.status}:`, body);
+
       if (response.status === 400 && body.includes('tool call validation')) {
-        return await callGroqWithoutTools(key, messages);
+        const text = await callGroqWithoutTools(key, messages, model);
+        return { content: text, toolResults: [] };
       }
-      return null;
+
+      if (response.status === 429) {
+        return defaultResult;
+      }
+
+      return defaultResult;
     }
 
     const data: any = await response.json();
     const choice = data?.choices?.[0]?.message;
-    if (!choice) return null;
+    if (!choice) return defaultResult;
 
     if (!choice.tool_calls || choice.tool_calls.length === 0) {
-      return choice.content?.trim() || null;
+      return { content: choice.content?.trim() || null, toolResults: [] };
     }
 
-    // Execute tools
     const toolResults: string[] = [];
     for (const toolCall of choice.tool_calls) {
       const result = await executeToolCall(toolCall);
@@ -501,13 +560,12 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
       messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
     }
 
-    // Round 2: Get final response
     const finalRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
       signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model,
         messages,
         temperature: 0.7,
         max_tokens: 2048,
@@ -515,24 +573,23 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
       }),
     });
 
-    if (!finalRes.ok) return toolResults.join('\n\n');
+    if (!finalRes.ok) return { content: null, toolResults };
     const finalData: any = await finalRes.json();
-    return finalData?.choices?.[0]?.message?.content?.trim() || toolResults.join('\n\n');
+    return { content: finalData?.choices?.[0]?.message?.content?.trim() || null, toolResults };
   } catch (err) {
-    console.error('Groq fail:', err);
-    return null;
+    console.error(`Groq ${model} fail:`, err);
+    return defaultResult;
   }
 }
 
-// Fallback when tool validation fails
-async function callGroqWithoutTools(key: string, messages: any[]): Promise<string | null> {
+async function callGroqWithoutTools(key: string, messages: any[], model: string): Promise<string | null> {
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
       signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model,
         messages,
         temperature: 0.7,
         max_tokens: 1024,
@@ -564,20 +621,34 @@ async function withRetry<T>(fn: () => Promise<T | null>, retries = 2, delay = 10
 
 const _geminiKeyAvailable = !!GEMINI_API_KEY();
 const _groqKeyAvailable = !!GROQ_API_KEY();
-console.log(`  AI      : ${_geminiKeyAvailable ? 'Gemini ✓' : 'Gemini ✗'} | ${_groqKeyAvailable ? 'Groq ✓' : 'Groq ✗'}`);
+console.log(`  AI      : ${_geminiKeyAvailable ? 'Gemini ✓' : 'Gemini ✗'} | ${_groqKeyAvailable ? `Groq ✓ (${GROQ_MODELS.join(', ')})` : 'Groq ✗'}`);
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-export async function chat(userMessage: string): Promise<ChatMessage[]> {
+export async function chat(userMessage: string): Promise<{ messages: ChatMessage[]; navigate: { screen: string; goalId?: string } | null }> {
+  _pendingNavigate = null;
+
   const ctx = await buildContext();
   const history = await db.getChatMessages();
 
   let reply: string | null = null;
 
   if (_groqKeyAvailable) {
-    reply = await withRetry(() => callGroq(userMessage, ctx, history), 1, 1500);
+    const result = await withRetry(() => callGroq(userMessage, ctx, history), 1, 1500);
+    if (result) {
+      // If tool results contain a navigate action, set the pending navigate
+      for (const tr of result.toolResults) {
+        if (tr.startsWith('__NAVIGATE__:')) {
+          try {
+            const navData = JSON.parse(tr.replace('__NAVIGATE__:', ''));
+            _pendingNavigate = { screen: navData.screen, goalId: navData.goalId };
+          } catch { /* ignore parse error */ }
+        }
+      }
+      reply = result.content;
+    }
   }
   if (!reply && _geminiKeyAvailable) {
     reply = await withRetry(() => callGemini(userMessage, ctx, history), 1, 2000);
@@ -589,5 +660,7 @@ export async function chat(userMessage: string): Promise<ChatMessage[]> {
   await db.addChatMessage({ role: 'user', content: userMessage });
   await db.addChatMessage({ role: 'assistant', content: reply });
 
-  return db.getChatMessages();
+  const messages = await db.getChatMessages();
+
+  return { messages, navigate: _pendingNavigate };
 }

@@ -49,7 +49,7 @@ export default function AppNavigator() {
       case 'Goals':
         return <Goals onNavigateGoal={navigateToGoal} />;
       case 'Assistant':
-        return <AIAssistant />;
+        return <AIAssistant onNavigate={(s) => navigate(s as AppScreen)} onNavigateGoal={navigateToGoal} />;
       case 'Transfer':
         return <SmartTransfer />;
       case 'GoalDetail':

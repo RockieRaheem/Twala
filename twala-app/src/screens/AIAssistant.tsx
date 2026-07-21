@@ -2,7 +2,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Animat
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
-import { chatApi, isBackendOnline, notifyChange, type ChatMsg } from '../services/api';
+import { chatApi, isBackendOnline, notifyChange, type ChatMsg, type NavigateAction } from '../services/api';
 
 function TypingDots() {
   const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
@@ -124,7 +124,14 @@ const richStyles = StyleSheet.create({
   },
 });
 
-export default function AIAssistant() {
+interface Props {
+  onNavigate?: (screen: string) => void;
+  onNavigateGoal?: (id: string) => void;
+}
+
+export type { Props as AIAssistantProps };
+
+export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
   const [message, setMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -159,9 +166,20 @@ export default function AIAssistant() {
     setError(null);
     setLocalMode(!isBackendOnline());
     const [chatRes, sugRes] = await Promise.all([chatApi.send(userMsg), chatApi.suggestions()]);
-    if (chatRes.success && chatRes.data && Array.isArray(chatRes.data) && chatRes.data.length > 0) {
-      setMessages(chatRes.data);
-      notifyChange();
+    if (chatRes.success && chatRes.data) {
+      const { messages: msgs, navigate } = chatRes.data as any;
+      if (Array.isArray(msgs) && msgs.length > 0) {
+        setMessages(msgs);
+        notifyChange();
+      }
+      if (navigate) {
+        const nav = navigate as NavigateAction;
+        if (nav.screen === 'GoalDetail' && nav.goalId && onNavigateGoal) {
+          onNavigateGoal(nav.goalId);
+        } else if (onNavigate) {
+          onNavigate(nav.screen);
+        }
+      }
     } else setError('Failed to send message. Please try again.');
     if (sugRes.success && sugRes.data) setSuggestions(sugRes.data);
     setIsTyping(false);

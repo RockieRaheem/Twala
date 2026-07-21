@@ -40,8 +40,8 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    const history = await ai.chat(message.trim());
-    res.json({ success: true, data: history });
+    const { messages, navigate } = await ai.chat(message.trim());
+    res.json({ success: true, data: messages, navigate });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ success: false, message: msg });

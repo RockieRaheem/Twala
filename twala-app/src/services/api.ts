@@ -101,6 +101,11 @@ export interface ChatMsg {
   timestamp: string;
 }
 
+export interface NavigateAction {
+  screen: string;
+  goalId?: string;
+}
+
 export interface RateData {
   usdcToUgx: number;
   usdToUgx: number;
@@ -209,7 +214,7 @@ export const chatApi = {
     request<ChatMsg[]>('/chat'),
 
   send: (message: string) =>
-    request<ChatMsg[]>('/chat', { method: 'POST', body: JSON.stringify({ message }) }, 25000),
+    request<{ messages: ChatMsg[]; navigate?: NavigateAction }>('/chat', { method: 'POST', body: JSON.stringify({ message }) }, 25000),
 
   clear: () =>
     request<ChatMsg[]>('/chat', { method: 'DELETE' }),
