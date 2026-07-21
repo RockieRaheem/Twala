@@ -207,7 +207,8 @@ export async function getAccountInfo(publicKey: string): Promise<StellarAccountI
 
 export async function initializeTestUsdc(): Promise<void> {
   if (!isTestnet()) return;
-  if (process.env.USDC_ISSUER) return; // respect explicit config
+  // Only skip if user provided BOTH an issuer address AND its secret key
+  if (process.env.USDC_ISSUER && process.env.USDC_ISSUER_SECRET) return;
 
   console.log(`  🔄 Initializing test USDC...`);
 
