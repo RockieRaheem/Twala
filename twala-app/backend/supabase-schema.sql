@@ -73,3 +73,10 @@ CREATE INDEX idx_transactions_status ON transactions(status);
 CREATE INDEX idx_transactions_kotani_ref ON transactions(kotani_reference_id);
 CREATE INDEX idx_chat_messages_created_at ON chat_messages(created_at ASC);
 CREATE INDEX idx_goals_status ON goals(status);
+
+-- Disable RLS for all tables (single-user demo app)
+ALTER TABLE wallets DISABLE ROW LEVEL SECURITY;
+ALTER TABLE goals DISABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_messages DISABLE ROW LEVEL SECURITY;
+ALTER TABLE exchange_rates DISABLE ROW LEVEL SECURITY;

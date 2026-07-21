@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, PostgrestError } from '@supabase/supabase-js';
 import type { WalletInfo, Transaction, Goal, ChatMessage, ExchangeRate } from '../types/index.js';
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
@@ -9,8 +9,7 @@ let _db: SupabaseClient | null = null;
 function db(): SupabaseClient {
   if (!_db) {
     if (!supabaseUrl || !supabaseKey) {
-      console.log('  ⚠️  Supabase not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in .env');
-      throw new Error('Supabase not configured');
+      throw new Error('Supabase not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in .env');
     }
     _db = createClient(supabaseUrl, supabaseKey, {
       auth: { persistSession: false },
@@ -20,18 +19,26 @@ function db(): SupabaseClient {
   return _db!;
 }
 
+function checkError(error: PostgrestError | null, context: string) {
+  if (error) {
+    throw new Error(`DB ${context}: ${error.message}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Wallet
 // ---------------------------------------------------------------------------
 
 export async function getWallet(): Promise<WalletInfo | null> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('wallets')
     .select('*')
     .order('created_at', { ascending: false })
     .limit(1)
     .single();
 
+  if (error && error.code === 'PGRST116') return null; // no rows
+  checkError(error, 'getWallet');
   if (!data) return null;
 
   return {
@@ -44,20 +51,16 @@ export async function getWallet(): Promise<WalletInfo | null> {
 }
 
 export async function saveWallet(wallet: WalletInfo): Promise<void> {
-  // Keep only one wallet — delete all then insert
-  await db().from('wallets').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-  await db().from('wallets').insert({
+  // Keep only one wallet
+  const { error: delErr } = await db().from('wallets').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  checkError(delErr, 'saveWallet (delete)');
+
+  const { error: insErr } = await db().from('wallets').insert({
     public_key: wallet.publicKey,
     secret_key: wallet.secretKey,
     is_funded: wallet.isFunded,
   });
-}
-
-export async function updateWalletBalances(publicKey: string, balanceUsdc: number, balanceXlm: number): Promise<void> {
-  await db()
-    .from('wallets')
-    .update({ updated_at: new Date().toISOString() })
-    .eq('public_key', publicKey);
+  checkError(insErr, 'saveWallet (insert)');
 }
 
 // ---------------------------------------------------------------------------
@@ -65,24 +68,25 @@ export async function updateWalletBalances(publicKey: string, balanceUsdc: numbe
 // ---------------------------------------------------------------------------
 
 export async function getGoals(): Promise<Goal[]> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('goals')
     .select('*')
     .order('created_at', { ascending: false });
 
-  if (!data) return [];
-  return data.map(goalRow);
+  checkError(error, 'getGoals');
+  return (data || []).map(goalRow);
 }
 
 export async function getGoal(id: string): Promise<Goal | null> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('goals')
     .select('*')
     .eq('id', id)
     .single();
 
-  if (!data) return null;
-  return goalRow(data);
+  if (error && error.code === 'PGRST116') return null;
+  checkError(error, 'getGoal');
+  return data ? goalRow(data) : null;
 }
 
 export async function createGoal(input: {
@@ -93,7 +97,7 @@ export async function createGoal(input: {
   category?: string;
   milestones?: any[];
 }): Promise<Goal> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('goals')
     .insert({
       title: input.title,
@@ -106,6 +110,7 @@ export async function createGoal(input: {
     .select()
     .single();
 
+  checkError(error, 'createGoal');
   if (!data) throw new Error('Failed to create goal');
   return goalRow(data);
 }
@@ -116,13 +121,15 @@ export async function updateGoal(id: string, updates: Partial<Goal>): Promise<Go
   if (updates.status !== undefined) dbUpdates.status = updates.status;
   if (updates.milestones !== undefined) dbUpdates.milestones = updates.milestones;
 
-  const { data } = await db()
+  const { data, error } = await db()
     .from('goals')
     .update(dbUpdates)
     .eq('id', id)
     .select()
     .single();
 
+  if (error && error.code === 'PGRST116') return null;
+  checkError(error, 'updateGoal');
   return data ? goalRow(data) : null;
 }
 
@@ -184,43 +191,46 @@ export async function getTransactions(options?: {
     query = query.eq('type', type);
   }
 
-  const { data, count } = await query
+  const { data, error, count } = await query
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
+  checkError(error, 'getTransactions');
   return {
     transactions: (data || []).map(txRow),
     total: count || 0,
   };
 }
 
-export async function getTransactionByKotaniRef(
-  referenceId: string
-): Promise<Transaction | null> {
-  const { data } = await db()
+export async function getTransactionByKotaniRef(referenceId: string): Promise<Transaction | null> {
+  const { data, error } = await db()
     .from('transactions')
     .select('*')
     .eq('kotani_reference_id', referenceId)
     .limit(1)
     .single();
 
+  if (error && error.code === 'PGRST116') return null;
+  checkError(error, 'getTransactionByKotaniRef');
   return data ? txRow(data) : null;
 }
 
 export async function getTransaction(id: string): Promise<Transaction | null> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('transactions')
     .select('*')
     .eq('id', id)
     .single();
 
+  if (error && error.code === 'PGRST116') return null;
+  checkError(error, 'getTransaction');
   return data ? txRow(data) : null;
 }
 
 export async function createTransaction(
   input: Omit<Transaction, 'id' | 'createdAt'> & { goalId?: string }
 ): Promise<Transaction> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('transactions')
     .insert({
       type: input.type,
@@ -241,6 +251,7 @@ export async function createTransaction(
     .select()
     .single();
 
+  checkError(error, 'createTransaction');
   if (!data) throw new Error('Failed to create transaction');
   return txRow(data);
 }
@@ -254,13 +265,15 @@ export async function updateTransaction(
   if (updates.kotaniStatus !== undefined) dbUpdates.kotani_status = updates.kotaniStatus;
   if (updates.stellarTxHash !== undefined) dbUpdates.stellar_tx_hash = updates.stellarTxHash;
 
-  const { data } = await db()
+  const { data, error } = await db()
     .from('transactions')
     .update(dbUpdates)
     .eq('id', id)
     .select()
     .single();
 
+  if (error && error.code === 'PGRST116') return null;
+  checkError(error, 'updateTransaction');
   return data ? txRow(data) : null;
 }
 
@@ -272,27 +285,30 @@ export async function getTransactionStats(): Promise<{
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-  const { data: sentData } = await db()
+  const { data: sentData, error: sentErr } = await db()
     .from('transactions')
     .select('amount_usdc')
     .eq('type', 'sent')
     .eq('status', 'completed');
+  checkError(sentErr, 'getTransactionStats (sent)');
 
-  const { data: receivedData } = await db()
+  const { data: receivedData, error: recErr } = await db()
     .from('transactions')
     .select('amount_usdc')
     .eq('type', 'received')
     .eq('status', 'completed');
+  checkError(recErr, 'getTransactionStats (received)');
 
-  const { data: monthData } = await db()
+  const { count, error: countErr } = await db()
     .from('transactions')
     .select('id', { count: 'exact', head: true })
     .gte('created_at', startOfMonth);
+  checkError(countErr, 'getTransactionStats (month)');
 
   return {
     totalSent: (sentData || []).reduce((s, r) => s + Number(r.amount_usdc), 0),
     totalReceived: (receivedData || []).reduce((s, r) => s + Number(r.amount_usdc), 0),
-    thisMonth: monthData?.length || 0,
+    thisMonth: count || 0,
   };
 }
 
@@ -322,13 +338,13 @@ function txRow(data: any): Transaction {
 // ---------------------------------------------------------------------------
 
 export async function getChatMessages(): Promise<ChatMessage[]> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('chat_messages')
     .select('*')
     .order('created_at', { ascending: true });
 
-  if (!data) return [];
-  return data.map((r: any) => ({
+  checkError(error, 'getChatMessages');
+  return (data || []).map((r: any) => ({
     id: r.id,
     role: r.role as 'user' | 'assistant' | 'system',
     content: r.content,
@@ -340,19 +356,22 @@ export async function addChatMessage(msg: {
   role: 'user' | 'assistant' | 'system';
   content: string;
 }): Promise<void> {
-  await db().from('chat_messages').insert({
+  const { error } = await db().from('chat_messages').insert({
     role: msg.role,
     content: msg.content,
   });
+  checkError(error, 'addChatMessage');
 }
 
 export async function clearChatMessages(): Promise<void> {
-  await db().from('chat_messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-  // Re-seed welcome message
-  await addChatMessage({
+  const { error } = await db().from('chat_messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  checkError(error, 'clearChatMessages');
+
+  const { error: seedErr } = await db().from('chat_messages').insert({
     role: 'assistant',
     content: "Hi! I'm **Kanzu**, your AI financial companion. I can help you send money to Uganda, track your savings goals, and more. What would you like to do today?",
   });
+  checkError(seedErr, 'clearChatMessages (seed)');
 }
 
 // ---------------------------------------------------------------------------
@@ -360,13 +379,15 @@ export async function clearChatMessages(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function getLatestRate(): Promise<ExchangeRate | null> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('exchange_rates')
     .select('*')
     .order('fetched_at', { ascending: false })
     .limit(1)
     .single();
 
+  if (error && error.code === 'PGRST116') return null;
+  checkError(error, 'getLatestRate');
   if (!data) return null;
 
   return {
@@ -378,10 +399,11 @@ export async function getLatestRate(): Promise<ExchangeRate | null> {
 }
 
 export async function saveRate(rate: ExchangeRate): Promise<void> {
-  await db().from('exchange_rates').insert({
+  const { error } = await db().from('exchange_rates').insert({
     usdc_to_ugx: rate.usdcToUgx,
     usd_to_ugx: rate.usdToUgx,
     change_24h: rate.change24h || 0,
     fetched_at: rate.lastUpdated || new Date().toISOString(),
   });
+  checkError(error, 'saveRate');
 }
