@@ -8,10 +8,10 @@ export interface WalletInfo {
 
 export interface Transaction {
   id: string;
-  type: 'sent' | 'received' | 'goal_contribution';
+  type: 'sent' | 'received';
   amountUsdc: number;
-  amountUgx: number;
-  rate: number;
+  amountUgx?: number;
+  rate?: number;
   recipientName: string;
   recipientPhone?: string;
   recipientNetwork?: 'MTN' | 'AIRTEL';
@@ -21,6 +21,7 @@ export interface Transaction {
   stellarOperationId?: string;
   kotaniReferenceId?: string;
   kotaniStatus?: string;
+  goalId?: string;
   createdAt: string;
 }
 
@@ -31,9 +32,9 @@ export interface Goal {
   targetAmountUgx: number;
   savedAmountUgx: number;
   targetDate: string;
-  category: 'home' | 'education' | 'business' | 'savings' | 'other';
+  category: string;
   milestones: Milestone[];
-  status: 'active' | 'completed' | 'paused';
+  status: string;
   createdAt: string;
 }
 
@@ -47,7 +48,8 @@ export interface Milestone {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant';
+  id?: string;
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
 }

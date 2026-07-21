@@ -1,5 +1,5 @@
-import { store } from '../store.js';
-import type { ChatMessage, AiContext } from '../types/index.js';
+import * as db from './database.js';
+import type { ChatMessage, AiContext, Transaction } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -9,15 +9,19 @@ const GEMINI_API_KEY = () => process.env.GEMINI_API_KEY || '';
 const GROQ_API_KEY = () => process.env.GROQ_API_KEY || '';
 
 // ---------------------------------------------------------------------------
-// Context builder
+// Context builder (reads live data from DB)
 // ---------------------------------------------------------------------------
 
-function buildContext(): AiContext {
+async function buildContext(): Promise<AiContext> {
+  const wallet = await db.getWallet();
+  const goals = await db.getGoals();
+  const { transactions } = await db.getTransactions({ limit: 10 });
+
   return {
-    walletBalance: store.wallet?.balanceUsdc || 0,
-    goals: store.goals,
-    recentTransactions: store.transactions.slice(0, 10),
-    activeGoal: store.goals.find((g) => g.status === 'active'),
+    walletBalance: wallet?.balanceUsdc || 0,
+    goals,
+    recentTransactions: transactions,
+    activeGoal: goals.find((g) => g.status === 'active') || null,
   };
 }
 
@@ -225,10 +229,9 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
 }
 
 // ---------------------------------------------------------------------------
-// Public API — pure LLM-powered, no rule-based fallback
+// Retry helper for flaky providers
 // ---------------------------------------------------------------------------
 
-// Retry helper for flaky providers
 async function withRetry<T>(fn: () => Promise<T | null>, retries = 2, delay = 1000): Promise<T | null> {
   for (let i = 0; i <= retries; i++) {
     const result = await fn();
@@ -239,7 +242,6 @@ async function withRetry<T>(fn: () => Promise<T | null>, retries = 2, delay = 10
 }
 
 // ---------------------------------------------------------------------------
-// Public API — pure LLM-powered, no rule-based fallback
 // Log configured providers at startup
 // ---------------------------------------------------------------------------
 
@@ -248,9 +250,13 @@ const _groqKeyAvailable = !!GROQ_API_KEY();
 
 console.log(`  AI      : ${_geminiKeyAvailable ? 'Gemini ✓' : 'Gemini ✗'} | ${_groqKeyAvailable ? 'Groq ✓' : 'Groq ✗'}`);
 
+// ---------------------------------------------------------------------------
+// Public API — pure LLM-powered, reads context from DB
+// ---------------------------------------------------------------------------
+
 export async function chat(userMessage: string): Promise<ChatMessage[]> {
-  const ctx = buildContext();
-  const history = store.chatHistory;
+  const ctx = await buildContext();
+  const history = await db.getChatMessages();
 
   let reply: string | null = null;
 
@@ -268,39 +274,10 @@ export async function chat(userMessage: string): Promise<ChatMessage[]> {
     throw new Error('AI service unavailable — no API keys configured or all providers failed');
   }
 
-  store.chatHistory.push({
-    role: 'user',
-    content: userMessage,
-    timestamp: new Date().toISOString(),
-  });
+  // Persist messages to DB
+  await db.addChatMessage({ role: 'user', content: userMessage });
+  await db.addChatMessage({ role: 'assistant', content: reply });
 
-  store.chatHistory.push({
-    role: 'assistant',
-    content: reply,
-    timestamp: new Date().toISOString(),
-  });
-
-  if (store.chatHistory.length > 50) {
-    store.chatHistory = store.chatHistory.slice(-50);
-  }
-
-  return store.chatHistory.map((m) => ({
-    role: m.role,
-    content: m.content,
-    timestamp: m.timestamp,
-  }));
-}
-
-export function getChatHistory(): ChatMessage[] {
-  return store.chatHistory;
-}
-
-export function clearChat(): void {
-  store.chatHistory = [
-    {
-      role: 'assistant',
-      content: "Hi! I'm **Kanzu**, your AI financial companion. I can help you send money to Uganda, track your savings goals, and more. What would you like to do today?",
-      timestamp: new Date().toISOString(),
-    },
-  ];
+  // Return full history
+  return db.getChatMessages();
 }
