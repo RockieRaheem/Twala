@@ -143,7 +143,7 @@ async function callGemini(userMessage: string, ctx: AiContext, history: ChatMess
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(25000),
         body: JSON.stringify({
           system_instruction: { parts: [{ text: systemPrompt }] },
           contents,
@@ -200,7 +200,7 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${key}`,
       },
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(25000),
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages,
@@ -228,16 +228,40 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
 // Public API — pure LLM-powered, no rule-based fallback
 // ---------------------------------------------------------------------------
 
+// Retry helper for flaky providers
+async function withRetry<T>(fn: () => Promise<T | null>, retries = 2, delay = 1000): Promise<T | null> {
+  for (let i = 0; i <= retries; i++) {
+    const result = await fn();
+    if (result !== null) return result;
+    if (i < retries) await new Promise((r) => setTimeout(r, delay * (i + 1)));
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Public API — pure LLM-powered, no rule-based fallback
+// Log configured providers at startup
+// ---------------------------------------------------------------------------
+
+const _geminiKeyAvailable = !!GEMINI_API_KEY();
+const _groqKeyAvailable = !!GROQ_API_KEY();
+
+console.log(`  AI      : ${_geminiKeyAvailable ? 'Gemini ✓' : 'Gemini ✗'} | ${_groqKeyAvailable ? 'Groq ✓' : 'Groq ✗'}`);
+
 export async function chat(userMessage: string): Promise<ChatMessage[]> {
   const ctx = buildContext();
   const history = store.chatHistory;
 
   let reply: string | null = null;
 
-  reply = await callGemini(userMessage, ctx, history);
+  // Groq first (faster, more reliable free tier)
+  if (_groqKeyAvailable) {
+    reply = await withRetry(() => callGroq(userMessage, ctx, history), 1, 1500);
+  }
 
-  if (!reply) {
-    reply = await callGroq(userMessage, ctx, history);
+  // Gemini as secondary fallback
+  if (!reply && _geminiKeyAvailable) {
+    reply = await withRetry(() => callGemini(userMessage, ctx, history), 1, 2000);
   }
 
   if (!reply) {

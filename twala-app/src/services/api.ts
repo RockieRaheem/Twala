@@ -4,11 +4,13 @@ import { Platform } from 'react-native';
 // Connection management
 // ---------------------------------------------------------------------------
 
+const LAN_IP = process.env.EXPO_PUBLIC_LAN_IP || '192.168.1.153';
+
 const LOCAL_DEV = Platform.OS === 'web'
   ? 'http://localhost:4000/api'
   : Platform.OS === 'android'
     ? 'http://10.0.2.2:4000/api'
-    : 'http://localhost:4000/api';
+    : `http://${LAN_IP}:4000/api`;
 
 const BASE_URL = __DEV__ ? LOCAL_DEV : 'https://your-production-api.com/api';
 
@@ -132,9 +134,10 @@ const DEMO_TXS = [
   { name: 'Sarah', amount: 150, purpose: 'School Fees', status: 'pending' as const },
 ];
 
-// Gemini API key from environment (exposed to client — acceptable for MVP)
+// Gemini API key — tries env var first, falls back to dev key
+// For production, set EXPO_PUBLIC_GEMINI_API_KEY in .env and restart bundler
 // Get a free key: https://aistudio.google.com/apikey
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || 'REMOVED';
 
 function buildGeminiPrompt(userMsg: string): string {
   const goalPct = Math.round((DEMO_GOAL.saved / DEMO_GOAL.target) * 100);
@@ -171,7 +174,7 @@ async function callGeminiLocal(userMsg: string): Promise<string | null> {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(20000),
         body: JSON.stringify({
           system_instruction: { parts: [{ text: systemPrompt }] },
           contents: [{ role: 'user', parts: [{ text: userMsg }] }],
@@ -218,7 +221,7 @@ function getLocalSuggestions(): string[] {
 async function request<T>(path: string, options?: RequestInit, fallback?: () => T | Promise<T>): Promise<ApiResult<T>> {
   const url = `${cachedBaseUrl}${path}`;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const timeout = setTimeout(() => controller.abort(), 3000);
 
   try {
     const res = await fetch(url, {
