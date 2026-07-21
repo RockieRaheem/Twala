@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as kotani from '../services/kotani.js';
-import { store } from '../store.js';
+import * as db from '../services/database.js';
 import config from '../config.js';
 
 const router = Router();
@@ -9,7 +9,7 @@ const router = Router();
 // POST /api/kotani/webhook — Kotani Pay webhook handler
 // ---------------------------------------------------------------------------
 
-router.post('/webhook', (req, res) => {
+router.post('/webhook', async (req, res) => {
   try {
     const payload: kotani.KotaniWebhookPayload = req.body;
     const signature = req.headers['x-kotani-signature'] as string;
@@ -18,25 +18,16 @@ router.post('/webhook', (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid signature' });
     }
 
-    const tx = store.transactions.find((t) => t.kotaniReferenceId === payload.referenceId);
+    const tx = await db.getTransactionByKotaniRef(payload.referenceId);
     if (tx) {
       if (payload.event.endsWith('.completed')) {
-        tx.status = 'completed';
-        tx.kotaniStatus = 'completed';
-        if (payload.transactionHash) tx.stellarTxHash = payload.transactionHash;
-
-        // Credit wallet on successful onramp
-        if (tx.type === 'received' && store.wallet) {
-          store.wallet.balanceUsdc += tx.amountUsdc;
-        }
+        await db.updateTransaction(tx.id, {
+          status: 'completed',
+          kotaniStatus: 'completed',
+          stellarTxHash: payload.transactionHash || tx.stellarTxHash,
+        });
       } else if (payload.event.endsWith('.failed')) {
-        tx.status = 'failed';
-        tx.kotaniStatus = 'failed';
-
-        // Refund wallet on failed offramp
-        if (tx.type === 'sent' && store.wallet) {
-          store.wallet.balanceUsdc += tx.amountUsdc;
-        }
+        await db.updateTransaction(tx.id, { status: 'failed', kotaniStatus: 'failed' });
       }
     }
 

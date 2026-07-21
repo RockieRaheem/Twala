@@ -1,36 +1,36 @@
 import { Router } from 'express';
 import * as ai from '../services/ai.js';
-import { store } from '../store.js';
+import * as db from '../services/database.js';
 
 const router = Router();
 
-function buildSuggestions(): string[] {
-  const s: string[] = [];
-  if (store.wallet && store.wallet.balanceUsdc > 0) {
-    s.push('What is my balance?');
-    s.push('Send money to Uganda');
-  } else {
-    s.push('Create a wallet');
-  }
-  if (store.goals.length > 0) {
-    s.push(`How is "${store.goals[0].title.substring(0, 20)}" doing?`);
-    s.push('Add to savings goal');
-  } else {
-    s.push('Help me set a savings goal');
-  }
-  s.push('What is the exchange rate?');
-  s.push('Show recent transactions');
-  s.push('What can you do?');
-  return s;
-}
-
-router.get('/', (_req, res) => {
-  const history = ai.getChatHistory();
+router.get('/', async (_req, res) => {
+  const history = await db.getChatMessages();
   res.json({ success: true, data: history });
 });
 
-router.get('/suggestions', (_req, res) => {
-  res.json({ success: true, data: buildSuggestions() });
+router.get('/suggestions', async (_req, res) => {
+  const suggestions: string[] = [];
+  const wallet = await db.getWallet();
+  const goals = await db.getGoals();
+
+  if (wallet && wallet.balanceUsdc > 0) {
+    suggestions.push('What is my balance?');
+    suggestions.push('Send money to Uganda');
+  } else {
+    suggestions.push('Create a wallet');
+  }
+  if (goals.length > 0) {
+    suggestions.push(`How is "${goals[0].title.substring(0, 20)}" doing?`);
+    suggestions.push('Add to savings goal');
+  } else {
+    suggestions.push('Help me set a savings goal');
+  }
+  suggestions.push('What is the exchange rate?');
+  suggestions.push('Show recent transactions');
+  suggestions.push('What can you do?');
+
+  res.json({ success: true, data: suggestions });
 });
 
 router.post('/', async (req, res) => {
@@ -48,9 +48,10 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.delete('/', (_req, res) => {
-  ai.clearChat();
-  res.json({ success: true, data: ai.getChatHistory() });
+router.delete('/', async (_req, res) => {
+  await db.clearChatMessages();
+  const history = await db.getChatMessages();
+  res.json({ success: true, data: history });
 });
 
 export default router;

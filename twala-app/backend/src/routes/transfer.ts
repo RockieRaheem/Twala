@@ -2,7 +2,7 @@ import { Router } from 'express';
 import * as stellar from '../services/stellar.js';
 import * as kotani from '../services/kotani.js';
 import { getExchangeRate, calculateQuote } from '../services/rates.js';
-import { store } from '../store.js';
+import * as db from '../services/database.js';
 import config from '../config.js';
 
 const router = Router();
@@ -59,15 +59,18 @@ router.post('/offramp', async (req, res) => {
       return res.status(400).json({ success: false, message: errors.join('; ') });
     }
 
-    if (!store.wallet) {
+    const wallet = await db.getWallet();
+    if (!wallet) {
       return res.status(400).json({ success: false, message: 'No wallet found. Create a wallet first.' });
     }
 
-    if (amountUsdc > store.wallet.balanceUsdc) {
+    // Validate balance via Stellar
+    const balance = await stellar.getBalance(wallet.publicKey);
+    if (amountUsdc > balance.usdc) {
       return res.status(400).json({
         success: false,
-        message: `Insufficient balance. You have $${store.wallet.balanceUsdc.toFixed(2)} USDC but trying to send $${amountUsdc.toFixed(2)}.`,
-        data: { balance: store.wallet.balanceUsdc, shortfall: amountUsdc - store.wallet.balanceUsdc },
+        message: `Insufficient balance. You have $${balance.usdc.toFixed(2)} USDC but trying to send $${amountUsdc.toFixed(2)}.`,
+        data: { balance: balance.usdc, shortfall: amountUsdc - balance.usdc },
       });
     }
 
@@ -79,14 +82,14 @@ router.post('/offramp', async (req, res) => {
     let stellarTxHash = '';
 
     try {
-      await stellar.ensureTrustline(store.wallet.secretKey);
+      await stellar.ensureTrustline(wallet.secretKey);
 
       if (!stellar.isValidPublicKey(KOTANI_ESCROW_ADDRESS)) {
         throw new Error('Invalid Kotani escrow address configured.');
       }
 
       stellarTxHash = await stellar.submitPayment(
-        store.wallet.secretKey,
+        wallet.secretKey,
         KOTANI_ESCROW_ADDRESS,
         quote.sendAmountUsdc.toFixed(7),
         referenceId
@@ -106,28 +109,21 @@ router.post('/offramp', async (req, res) => {
       transactionHash: stellarTxHash,
     });
 
-    // Step 3: Deduct from local wallet balance
-    store.wallet.balanceUsdc = Math.max(0, store.wallet.balanceUsdc - quote.sendAmountUsdc);
-
-    // Step 4: Create transaction record
-    const tx = {
-      id: `tx-${Date.now()}`,
-      type: 'sent' as const,
+    // Step 3: Create transaction record in DB
+    const tx = await db.createTransaction({
+      type: 'sent',
       amountUsdc: quote.sendAmountUsdc,
       amountUgx: quote.receiveAmountUgx,
       rate: quote.rate,
       recipientName: recipientName.trim(),
       recipientPhone: recipientPhone || '',
       recipientNetwork: (recipientNetwork as 'MTN' | 'AIRTEL') || 'MTN',
-      status: 'pending' as const,
+      status: 'pending',
       purpose: purpose.trim(),
       stellarTxHash,
       kotaniReferenceId: referenceId,
       kotaniStatus: kotaniResult.data?.status || 'pending',
-      createdAt: new Date().toISOString(),
-    };
-
-    store.transactions.unshift(tx);
+    });
 
     res.json({
       success: true,
@@ -177,24 +173,19 @@ router.post('/onramp', async (req, res) => {
       network,
     });
 
-    const tx = {
-      id: `tx-${Date.now()}`,
-      type: 'received' as const,
+    const tx = await db.createTransaction({
+      type: 'received',
       amountUsdc: cryptoAmount,
       amountUgx: fiatAmount,
       rate: rate.usdcToUgx,
       recipientName: phoneNumber.trim(),
       recipientPhone: phoneNumber.trim(),
       recipientNetwork: network as 'MTN' | 'AIRTEL',
-      status: 'pending' as const,
+      status: 'pending',
       purpose: 'Mobile Money Deposit',
-      stellarTxHash: '',
       kotaniReferenceId: referenceId,
       kotaniStatus: kotaniResult.data?.status || 'pending',
-      createdAt: new Date().toISOString(),
-    };
-
-    store.transactions.unshift(tx);
+    });
 
     res.json({
       success: true,
@@ -217,7 +208,7 @@ router.post('/onramp', async (req, res) => {
 router.get('/status/:referenceId', async (req, res) => {
   try {
     const { referenceId } = req.params;
-    const tx = store.transactions.find((t) => t.kotaniReferenceId === referenceId);
+    const tx = await db.getTransactionByKotaniRef(referenceId);
     if (!tx) {
       return res.status(404).json({ success: false, message: 'Transaction not found' });
     }
@@ -228,12 +219,17 @@ router.get('/status/:referenceId', async (req, res) => {
 
     if (statusResult.success && statusResult.data) {
       const kotaniStatus = statusResult.data.status;
+      let newStatus: 'pending' | 'completed' | 'failed' | undefined;
       if (kotaniStatus === 'completed' && tx.status === 'pending') {
-        tx.status = 'completed';
+        newStatus = 'completed';
       } else if (kotaniStatus === 'failed' && tx.status === 'pending') {
-        tx.status = 'failed';
+        newStatus = 'failed';
       }
-      tx.kotaniStatus = kotaniStatus;
+      if (newStatus) {
+        await db.updateTransaction(tx.id, { status: newStatus, kotaniStatus });
+        tx.status = newStatus;
+        tx.kotaniStatus = kotaniStatus;
+      }
     }
 
     res.json({
@@ -253,7 +249,7 @@ router.get('/status/:referenceId', async (req, res) => {
 // POST /api/transfer/webhook — Kotani Pay webhook handler
 // ---------------------------------------------------------------------------
 
-router.post('/webhook', (req, res) => {
+router.post('/webhook', async (req, res) => {
   try {
     const payload: kotani.KotaniWebhookPayload = req.body;
     const signature = req.headers['x-kotani-signature'] as string;
@@ -262,18 +258,19 @@ router.post('/webhook', (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid signature' });
     }
 
-    const tx = store.transactions.find((t) => t.kotaniReferenceId === payload.referenceId);
+    const tx = await db.getTransactionByKotaniRef(payload.referenceId);
     if (tx) {
       if (payload.event.endsWith('.completed')) {
-        tx.status = 'completed';
-        tx.kotaniStatus = 'completed';
-        if (payload.transactionHash) tx.stellarTxHash = payload.transactionHash;
+        await db.updateTransaction(tx.id, {
+          status: 'completed',
+          kotaniStatus: 'completed',
+          stellarTxHash: payload.transactionHash || tx.stellarTxHash,
+        });
       } else if (payload.event.endsWith('.failed')) {
-        tx.status = 'failed';
-        tx.kotaniStatus = 'failed';
-        if (store.wallet && tx.type === 'sent') {
-          store.wallet.balanceUsdc += tx.amountUsdc;
-        }
+        await db.updateTransaction(tx.id, {
+          status: 'failed',
+          kotaniStatus: 'failed',
+        });
       }
     }
 
@@ -291,7 +288,7 @@ router.post('/webhook', (req, res) => {
 router.post('/retry/:referenceId', async (req, res) => {
   try {
     const { referenceId } = req.params;
-    const tx = store.transactions.find((t) => t.kotaniReferenceId === referenceId);
+    const tx = await db.getTransactionByKotaniRef(referenceId);
 
     if (!tx) {
       return res.status(404).json({ success: false, message: 'Transaction not found' });
@@ -300,6 +297,7 @@ router.post('/retry/:referenceId', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Only failed transactions can be retried' });
     }
 
+    await db.updateTransaction(tx.id, { status: 'pending', kotaniStatus: 'pending' });
     tx.status = 'pending';
     tx.kotaniStatus = 'pending';
 
@@ -312,7 +310,9 @@ router.post('/retry/:referenceId', async (req, res) => {
         token: 'USDC',
         transactionHash: tx.stellarTxHash,
       });
-      tx.kotaniReferenceId = kotaniResult.data?.referenceId || tx.kotaniReferenceId;
+      const newRefId = kotaniResult.data?.referenceId || tx.kotaniReferenceId;
+      await db.updateTransaction(tx.id, { kotaniReferenceId: newRefId });
+      tx.kotaniReferenceId = newRefId;
     }
 
     res.json({ success: true, data: { transaction: tx }, message: 'Retry submitted' });

@@ -1,0 +1,75 @@
+-- Run this SQL in your Supabase SQL Editor (https://supabase.com/dashboard/project/_/sql/new)
+
+-- Enable UUID
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Wallet
+CREATE TABLE wallets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  public_key TEXT NOT NULL,
+  secret_key TEXT NOT NULL,
+  is_funded BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Goals with milestones as JSONB
+CREATE TABLE goals (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  target_amount_ugx NUMERIC(20,0) NOT NULL,
+  saved_amount_ugx NUMERIC(20,0) DEFAULT 0,
+  target_date TIMESTAMPTZ,
+  category TEXT DEFAULT 'other',
+  milestones JSONB DEFAULT '[]'::jsonb,
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'cancelled')),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Transactions with optional goal link
+CREATE TABLE transactions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  type TEXT NOT NULL CHECK (type IN ('sent', 'received')),
+  amount_usdc NUMERIC(20,7) NOT NULL,
+  amount_ugx NUMERIC(20,0),
+  rate NUMERIC(10,2),
+  recipient_name TEXT DEFAULT '',
+  recipient_phone TEXT DEFAULT '',
+  recipient_network TEXT DEFAULT '',
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
+  purpose TEXT DEFAULT '',
+  stellar_tx_hash TEXT DEFAULT '',
+  stellar_operation_id TEXT DEFAULT '',
+  kotani_reference_id TEXT DEFAULT '',
+  kotani_status TEXT DEFAULT '',
+  goal_id UUID REFERENCES goals(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Chat messages
+CREATE TABLE chat_messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Exchange rates (cached)
+CREATE TABLE exchange_rates (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  usdc_to_ugx NUMERIC(10,2) NOT NULL,
+  usd_to_ugx NUMERIC(10,2) NOT NULL,
+  change_24h NUMERIC(5,2) DEFAULT 0,
+  fetched_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Indexes for performance
+CREATE INDEX idx_transactions_created_at ON transactions(created_at DESC);
+CREATE INDEX idx_transactions_type ON transactions(type);
+CREATE INDEX idx_transactions_status ON transactions(status);
+CREATE INDEX idx_transactions_kotani_ref ON transactions(kotani_reference_id);
+CREATE INDEX idx_chat_messages_created_at ON chat_messages(created_at ASC);
+CREATE INDEX idx_goals_status ON goals(status);

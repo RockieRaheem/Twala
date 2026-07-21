@@ -1,18 +1,15 @@
 import { Router } from 'express';
 import * as stellar from '../services/stellar.js';
-import { store } from '../store.js';
+import * as db from '../services/database.js';
 
 const router = Router();
 
 router.post('/create', async (_req, res) => {
   try {
     const wallet = await stellar.createWallet();
+    await db.saveWallet(wallet);
     await stellar.ensureTrustline(wallet.secretKey);
     const freshBalance = await stellar.getBalance(wallet.publicKey);
-    if (store.wallet) {
-      store.wallet.balanceUsdc = freshBalance.usdc;
-      store.wallet.balanceXlm = freshBalance.xlm;
-    }
     res.json({
       success: true,
       data: {
@@ -34,6 +31,7 @@ router.post('/restore', async (req, res) => {
     if (!secretKey) return res.status(400).json({ success: false, message: 'secretKey required' });
 
     const wallet = await stellar.restoreWallet(secretKey);
+    await db.saveWallet(wallet);
     res.json({
       success: true,
       data: {
@@ -51,24 +49,21 @@ router.post('/restore', async (req, res) => {
 
 router.get('/balance', async (_req, res) => {
   try {
-    if (!store.wallet) {
+    const wallet = await db.getWallet();
+    if (!wallet) {
       return res.json({
         success: true,
         data: { balanceUsdc: 0, balanceXlm: 0, publicKey: null, isFunded: false },
       });
     }
-    const balance = await stellar.getBalance(store.wallet.publicKey);
-    if (store.wallet) {
-      store.wallet.balanceUsdc = balance.usdc;
-      store.wallet.balanceXlm = balance.xlm;
-    }
+    const balance = await stellar.getBalance(wallet.publicKey);
     res.json({
       success: true,
       data: {
         balanceUsdc: balance.usdc,
         balanceXlm: balance.xlm,
-        publicKey: store.wallet.publicKey,
-        isFunded: store.wallet.isFunded,
+        publicKey: wallet.publicKey,
+        isFunded: wallet.isFunded,
       },
     });
   } catch (err) {
@@ -78,26 +73,28 @@ router.get('/balance', async (_req, res) => {
 });
 
 router.get('/info', async (_req, res) => {
-  if (!store.wallet) {
+  const wallet = await db.getWallet();
+  if (!wallet) {
     return res.json({ success: true, data: null });
   }
   res.json({
     success: true,
     data: {
-      publicKey: store.wallet.publicKey,
-      balanceUsdc: store.wallet.balanceUsdc,
-      balanceXlm: store.wallet.balanceXlm,
-      isFunded: store.wallet.isFunded,
+      publicKey: wallet.publicKey,
+      balanceUsdc: wallet.balanceUsdc,
+      balanceXlm: wallet.balanceXlm,
+      isFunded: wallet.isFunded,
     },
   });
 });
 
 router.get('/details', async (_req, res) => {
   try {
-    if (!store.wallet) {
+    const wallet = await db.getWallet();
+    if (!wallet) {
       return res.json({ success: true, data: null });
     }
-    const info = await stellar.getAccountInfo(store.wallet.publicKey);
+    const info = await stellar.getAccountInfo(wallet.publicKey);
     res.json({ success: true, data: info });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -107,12 +104,13 @@ router.get('/details', async (_req, res) => {
 
 router.get('/payments', async (req, res) => {
   try {
-    if (!store.wallet) {
+    const wallet = await db.getWallet();
+    if (!wallet) {
       return res.json({ success: true, data: { payments: [], cursor: '' } });
     }
     const limit = parseInt(req.query.limit as string) || 20;
     const cursor = req.query.cursor as string | undefined;
-    const result = await stellar.getStellarPayments(store.wallet.publicKey, limit, cursor);
+    const result = await stellar.getStellarPayments(wallet.publicKey, limit, cursor);
     res.json({ success: true, data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
