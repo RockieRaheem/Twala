@@ -201,6 +201,21 @@ const TOOLS: any[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'update_transaction',
+      description: 'Update a transaction purpose — use the exact UUID from recent transactions as transactionId',
+      parameters: {
+        type: 'object',
+        properties: {
+          transactionId: { type: 'string', description: 'The exact UUID of the transaction from recent transactions' },
+          purpose: { type: 'string', description: 'New purpose text (e.g. "School Fees", "Family Support")' },
+        },
+        required: ['transactionId', 'purpose'],
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
