@@ -4,6 +4,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 import { transferApi, ratesApi, goalsApi, getPendingGoalId, setPendingGoalId, type GoalData } from '../services/api';
 import DismissKeyboard from '../components/DismissKeyboard';
+import SendSuccess from '../components/SendSuccess';
 
 type TransferMode = 'send' | 'deposit';
 
@@ -118,6 +119,12 @@ export default function SmartTransfer() {
   const [submitting, setSubmitting] = useState(false);
   const [goals, setGoals] = useState<GoalData[]>([]);
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
+  const [successData, setSuccessData] = useState<{
+    amountUsdc: number; amountUgx: number; recipientName: string;
+    recipientPhone?: string; recipientNetwork?: string;
+    referenceId: string; newBalance: number; feeUsdc: number; rate: number;
+    goalTitle?: string;
+  } | null>(null);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const scrollRef = useRef<ScrollView>(null);
   const amountRef = useRef<TextInput>(null);
@@ -186,48 +193,67 @@ export default function SmartTransfer() {
       if (!quote) return Alert.alert('No quote', 'Unable to get exchange rate. Try again.');
       if (!recipientName.trim()) return Alert.alert('Recipient Name', 'Enter the recipient name.');
       setSubmitting(true);
-      const res = await transferApi.offramp({
-        amountUsdc: usdAmount,
-        recipientName: recipientName.trim(),
-        recipientPhone: recipientPhone.trim() || undefined,
-        recipientNetwork,
-        purpose: selectedPurpose.label,
-        goalId: selectedGoalId || undefined,
-      });
-      setSubmitting(false);
-      if (res.success) {
-        const newBal = res.data?.balance;
-        const goalMsg = selectedGoalId ? '\n🎯 Funds added to your goal.' : '';
-        const balMsg = newBal !== undefined ? `\n💰 Wallet: $${newBal.toFixed(2)} USDC remaining.` : '';
-        Alert.alert(
-          '✅ Transfer Submitted!',
-          `${res.data?.message || 'Your transfer is being processed.'}${goalMsg}${balMsg}\n\nThe dashboard will update automatically.`
-        );
-        setAmount('500');
-        setRecipientName('');
-        setRecipientPhone('');
-        setSelectedGoalId(null);
-        setQuote(null);
-      } else {
-        Alert.alert('Error', res.message || 'Transfer failed.');
+      try {
+        const res = await transferApi.offramp({
+          amountUsdc: usdAmount,
+          recipientName: recipientName.trim(),
+          recipientPhone: recipientPhone.trim() || undefined,
+          recipientNetwork,
+          purpose: selectedPurpose.label,
+          goalId: selectedGoalId || undefined,
+        });
+        if (res.success && res.data) {
+          const g = goals.find((x) => x.id === selectedGoalId);
+          const bal = res.data.balance ?? 0;
+          setSuccessData({
+            amountUsdc: quote!.sendAmountUsdc,
+            amountUgx: quote!.receiveAmountUgx,
+            recipientName: recipientName.trim(),
+            recipientPhone: recipientPhone.trim() || undefined,
+            recipientNetwork,
+            referenceId: res.data.kotaniReferenceId,
+            newBalance: bal,
+            feeUsdc: quote!.feeUsdc,
+            rate: quote!.rate,
+            goalTitle: g?.title,
+          });
+          setAmount('500');
+          setRecipientName('');
+          setRecipientPhone('');
+          setSelectedGoalId(null);
+          setQuote(null);
+        } else {
+          Alert.alert('Error', res.message || 'Transfer failed.');
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        Alert.alert('Transfer Failed', msg);
+      } finally {
+        setSubmitting(false);
       }
     } else {
       const fiatAmount = parseFloat(amount.replace(/,/g, '')) * liveRate || 0;
       if (fiatAmount < 10000) return Alert.alert('Minimum UGX 10,000', 'Enter a larger amount.');
       if (!recipientPhone.trim()) return Alert.alert('Phone Number', 'Enter your MTN/Airtel phone number.');
       setSubmitting(true);
-      const res = await transferApi.onramp({
-        fiatAmount,
-        phoneNumber: recipientPhone.trim(),
-        network: recipientNetwork,
-      });
-      setSubmitting(false);
-      if (res.success) {
-        Alert.alert('Deposit Request Submitted!', res.data?.message || `Pay UGX ${fiatAmount.toLocaleString()} via ${recipientNetwork} to receive USDC.`);
-        setAmount('500');
-        setRecipientPhone('');
-      } else {
-        Alert.alert('Error', res.message || 'Deposit request failed.');
+      try {
+        const res = await transferApi.onramp({
+          fiatAmount,
+          phoneNumber: recipientPhone.trim(),
+          network: recipientNetwork,
+        });
+        if (res.success) {
+          Alert.alert('Deposit Request Submitted!', res.data?.message || `Pay UGX ${fiatAmount.toLocaleString()} via ${recipientNetwork} to receive USDC.`);
+          setAmount('500');
+          setRecipientPhone('');
+        } else {
+          Alert.alert('Error', res.message || 'Deposit request failed.');
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        Alert.alert('Deposit Failed', msg);
+      } finally {
+        setSubmitting(false);
       }
     }
   };
@@ -489,6 +515,21 @@ export default function SmartTransfer() {
         </ScrollView>
         </DismissKeyboard>
       </KeyboardAvoidingView>
+
+      <SendSuccess
+        visible={!!successData}
+        amountUsdc={successData?.amountUsdc ?? 0}
+        amountUgx={successData?.amountUgx ?? 0}
+        recipientName={successData?.recipientName ?? ''}
+        recipientPhone={successData?.recipientPhone}
+        recipientNetwork={successData?.recipientNetwork}
+        referenceId={successData?.referenceId ?? ''}
+        newBalance={successData?.newBalance ?? 0}
+        feeUsdc={successData?.feeUsdc ?? 0}
+        rate={successData?.rate ?? 0}
+        goalTitle={successData?.goalTitle}
+        onDone={() => setSuccessData(null)}
+      />
     </View>
   );
 }
