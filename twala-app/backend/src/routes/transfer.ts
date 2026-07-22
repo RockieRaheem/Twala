@@ -3,12 +3,11 @@ import * as stellar from '../services/stellar.js';
 import * as kotani from '../services/kotani.js';
 import { getExchangeRate, calculateQuote } from '../services/rates.js';
 import * as db from '../services/database.js';
+import { sendTransferNotification } from '../services/sms.js';
 import { notifyChange } from '../services/events.js';
 import config from '../config.js';
 
 const router = Router();
-
-const KOTANI_ESCROW_ADDRESS = 'GA7Q5OQJ6X4G6T5ZVQ4Q3Z6H5KQ7R5QKZ6H5KQ7R5QKZ6H5KQ7R5QKZ6';
 
 // ---------------------------------------------------------------------------
 // GET /api/transfer/quote?amount=XXX
@@ -79,66 +78,77 @@ router.post('/offramp', async (req, res) => {
     const quote = calculateQuote(amountUsdc, rate);
     const referenceId = kotani.generateReferenceId();
 
-    // Step 1: Submit USDC payment — always a real Stellar tx so balance actually changes
+    // Step 1: Determine destination address
+    const kotaniEscrow = config.kotani.escrowAddress;
+    const hasKotaniApiKey = !!config.kotani.apiKey;
+    const destination = hasKotaniApiKey && stellar.isValidPublicKey(kotaniEscrow)
+      ? kotaniEscrow
+      : config.stellar.usdcIssuer; // demo mode → send to self-managed issuer (real balance deduction)
+
+    // Step 2: Submit USDC payment on Stellar
     let stellarTxHash = '';
     try {
       await stellar.ensureTrustline(wallet.secretKey);
-
-      // Use Kotani escrow if valid, otherwise send back to USDC issuer (demo mode)
-      const destination = stellar.isValidPublicKey(KOTANI_ESCROW_ADDRESS)
-        ? KOTANI_ESCROW_ADDRESS
-        : config.stellar.usdcIssuer;
-
       if (!stellar.isValidPublicKey(destination)) {
-        throw new Error('No valid destination address configured.');
+        throw new Error(`Invalid destination address: ${destination}`);
       }
       stellarTxHash = await stellar.submitPayment(
-        wallet.secretKey,
-        destination,
-        quote.sendAmountUsdc.toFixed(7),
-        referenceId
+        wallet.secretKey, destination, quote.sendAmountUsdc.toFixed(7), referenceId,
       );
+      console.log(`  ✅ Stellar payment sent: ${stellarTxHash.slice(0, 8)}... (${quote.sendAmountUsdc} USDC → ${destination.slice(0, 8)}...)`);
     } catch (stellarErr) {
       const msg = stellarErr instanceof Error ? stellarErr.message : String(stellarErr);
-      console.warn(`  Stellar payment warning: ${msg}`);
+      console.warn(`  ⚠️ Stellar payment failed: ${msg} — using demo hash`);
       stellarTxHash = `demo-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     }
 
-    // Step 2: Sync wallet balance to DB after payment
+    // Step 3: Sync wallet balance to DB after payment
     const newBalance = await stellar.getBalance(wallet.publicKey);
     await db.updateWalletBalance(wallet.publicKey, newBalance.usdc, newBalance.xlm);
     notifyChange();
 
-    // Step 3: Submit offramp request to Kotani Pay
+    // Step 4: Submit offramp request to Kotani Pay
     const kotaniResult = await kotani.createOfframp({
-      referenceId,
-      cryptoAmount: quote.sendAmountUsdc,
-      currency: 'UGX',
-      chain: 'STELLAR',
-      token: 'USDC',
-      transactionHash: stellarTxHash,
+      referenceId, cryptoAmount: quote.sendAmountUsdc, currency: 'UGX',
+      chain: 'STELLAR', token: 'USDC', transactionHash: stellarTxHash,
     });
 
-    // Step 4: Create transaction record in DB
+    // Step 5: Create transaction record in DB
     const tx = await db.createTransaction({
-      type: 'sent',
-      amountUsdc: quote.sendAmountUsdc,
-      amountUgx: quote.receiveAmountUgx,
-      rate: quote.rate,
-      recipientName: recipientName.trim(),
-      recipientPhone: recipientPhone || '',
+      type: 'sent', amountUsdc: quote.sendAmountUsdc, amountUgx: quote.receiveAmountUgx,
+      rate: quote.rate, recipientName: recipientName.trim(), recipientPhone: recipientPhone || '',
       recipientNetwork: (recipientNetwork as 'MTN' | 'AIRTEL') || 'MTN',
-      status: 'pending',
-      purpose: purpose.trim(),
-      stellarTxHash,
-      kotaniReferenceId: referenceId,
-      kotaniStatus: kotaniResult.data?.status || 'pending',
+      status: 'pending', purpose: purpose.trim(), stellarTxHash,
+      kotaniReferenceId: referenceId, kotaniStatus: kotaniResult.data?.status || 'pending',
       goalId: goalId || undefined,
     });
 
-    // If goalId provided, contribute the UGX amount to the goal
+    // Step 6: Contribute to goal if goalId provided
     if (goalId) {
       await db.contributeToGoal(goalId, quote.receiveAmountUgx);
+    }
+
+    // Step 7: Send SMS notification to recipient
+    let smsResult: { success: boolean; message: string } | null = null;
+    if (recipientPhone) {
+      try {
+        smsResult = await sendTransferNotification({
+          phoneNumber: recipientPhone,
+          recipientName: recipientName.trim(),
+          amountUgx: quote.receiveAmountUgx,
+          amountUsdc: quote.sendAmountUsdc,
+          senderName: 'Twala User',
+        });
+        if (smsResult.success) {
+          console.log(`  ✅ SMS sent to ${recipientPhone}`);
+        } else {
+          console.warn(`  ⚠️ SMS: ${smsResult.message}`);
+        }
+      } catch (smsErr) {
+        const msg = smsErr instanceof Error ? smsErr.message : String(smsErr);
+        console.warn(`  ⚠️ SMS error: ${msg}`);
+        smsResult = { success: false, message: msg };
+      }
     }
 
     res.json({
@@ -148,11 +158,13 @@ router.post('/offramp', async (req, res) => {
         quote,
         kotaniReferenceId: referenceId,
         balance: newBalance.usdc,
+        sms: smsResult,
         message: `Sent $${quote.sendAmountUsdc.toFixed(2)} USDC → ${recipientName.trim()}. Delivering ~${quote.receiveAmountUgx.toLocaleString()} UGX via ${recipientNetwork || 'MTN'} Mobile Money. Reference: ${referenceId.slice(-8)}`,
       },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    console.error(`  ❌ Offramp error: ${msg}`);
     res.status(500).json({ success: false, message: `Transfer failed: ${msg}` });
   }
 });

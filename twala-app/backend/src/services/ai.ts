@@ -2,11 +2,10 @@ import * as db from './database.js';
 import * as stellar from './stellar.js';
 import { getExchangeRate, calculateQuote } from './rates.js';
 import * as kotani from './kotani.js';
+import { sendTransferNotification } from './sms.js';
 import { notifyChange } from './events.js';
 import config from '../config.js';
 import type { ChatMessage, AiContext } from '../types/index.js';
-
-const KOTANI_ESCROW_ADDRESS = 'GA7Q5OQJ6X4G6T5ZVQ4Q3Z6H5KQ7R5QKZ6H5KQ7R5QKZ6H5KQ7R5QKZ6';
 
 // Models in priority order (best function-calling first, then fallbacks)
 // Only actively supported models — confirmed via Groq docs as of July 2026
@@ -257,12 +256,15 @@ async function executeToolCall(toolCall: any): Promise<string> {
         let stellarTxHash = '';
         try {
           await stellar.ensureTrustline(wallet.secretKey);
-          const destination = stellar.isValidPublicKey(KOTANI_ESCROW_ADDRESS)
-            ? KOTANI_ESCROW_ADDRESS
+          const kotaniEscrow = config.kotani.escrowAddress;
+          const hasKotaniApiKey = !!config.kotani.apiKey;
+          const destination = hasKotaniApiKey && stellar.isValidPublicKey(kotaniEscrow)
+            ? kotaniEscrow
             : config.stellar.usdcIssuer;
           stellarTxHash = await stellar.submitPayment(
             wallet.secretKey, destination, quote.sendAmountUsdc.toFixed(7), referenceId,
           );
+          console.log(`  ✅ AI: Stellar payment sent ${stellarTxHash.slice(0, 8)}...`);
         } catch { stellarTxHash = `demo-${Date.now()}`; }
 
         // Sync wallet balance after payment
@@ -282,6 +284,20 @@ async function executeToolCall(toolCall: any): Promise<string> {
           stellarTxHash, kotaniReferenceId: referenceId,
           kotaniStatus: kotaniResult.data?.status || 'pending',
         });
+
+        // Send SMS if phone provided
+        if (args.recipientPhone) {
+          try {
+            const smsRes = await sendTransferNotification({
+              phoneNumber: args.recipientPhone,
+              recipientName: args.recipientName,
+              amountUgx: quote.receiveAmountUgx,
+              amountUsdc: quote.sendAmountUsdc,
+              senderName: 'Twala User',
+            });
+            if (smsRes.success) console.log(`  ✅ AI SMS sent to ${args.recipientPhone}`);
+          } catch { /* SMS is best-effort */ }
+        }
 
         return `✅ **Sent ${usdc(quote.sendAmountUsdc)} to ${args.recipientName}!** Delivery: ~${fiat(quote.receiveAmountUgx)} UGX via ${network}. Fee: ${usdc(quote.feeUsdc)}. Balance: ${usdc(newBalance.usdc)} remaining. Ref: ${referenceId.slice(-8)}`;
       }

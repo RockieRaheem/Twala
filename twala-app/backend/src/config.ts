@@ -11,6 +11,12 @@ const config = {
     sandboxUrl: 'https://sandbox-api.kotanipay.io',
     productionUrl: 'https://api.kotanipay.io',
     useSandbox: process.env.KOTANI_USE_SANDBOX !== 'false',
+    escrowAddress: process.env.KOTANI_ESCROW_ADDRESS || '',
+  },
+  africasTalking: {
+    username: process.env.AT_USERNAME || 'sandbox',
+    apiKey: process.env.AT_API_KEY || '',
+    senderId: process.env.AT_SENDER_ID || 'TWALA',
   },
   twala: {
     feePercent: 0.5,
