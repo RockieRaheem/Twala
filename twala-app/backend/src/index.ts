@@ -117,14 +117,13 @@ setInterval(async () => {
           try {
             const result = await kotani.getOfframpStatus(tx.kotaniReferenceId);
             if (result.success && result.data) {
-              const newStatus = result.data.status;
-              if (newStatus === 'completed' && tx.status === 'pending') {
-                await db.updateTransaction(tx.id, { status: 'completed', kotaniStatus: 'completed' });
+              const ks = result.data.status;
+              const terminal: Record<string, 'completed' | 'failed'> = { SUCCESSFUL: 'completed', FAILED: 'failed', REFUNDED: 'completed' };
+              const newStatus = terminal[ks];
+              if (newStatus && tx.status === 'pending') {
+                await db.updateTransaction(tx.id, { status: newStatus, kotaniStatus: ks });
                 notifyChange();
-                console.log(`  ✅ Background: offramp ${tx.kotaniReferenceId.slice(-8)} completed`);
-              } else if (newStatus === 'failed' && tx.status === 'pending') {
-                await db.updateTransaction(tx.id, { status: 'failed', kotaniStatus: 'failed' });
-                console.log(`  ❌ Background: offramp ${tx.kotaniReferenceId.slice(-8)} failed`);
+                console.log(`  ${newStatus === 'completed' ? '✅' : '❌'} Background: offramp ${tx.kotaniReferenceId.slice(-8)} → ${ks}`);
               }
             }
           } catch { /* ignore poll errors */ }

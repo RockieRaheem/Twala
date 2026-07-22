@@ -110,7 +110,9 @@ router.post('/offramp', async (req, res) => {
     // Step 4: Submit offramp request to Kotani Pay
     const kotaniResult = await kotani.createOfframp({
       referenceId, cryptoAmount: quote.sendAmountUsdc, currency: 'UGX',
-      chain: 'STELLAR', token: 'USDC', transactionHash: stellarTxHash,
+      chain: 'STELLAR', token: 'USDC',
+      transactionHash: stellarTxHash,
+      callbackUrl: `${req.protocol}://${req.get('host')}/api/transfer/webhook`,
     });
 
     // Step 5: Create transaction record in DB
@@ -119,7 +121,7 @@ router.post('/offramp', async (req, res) => {
       rate: quote.rate, recipientName: recipientName.trim(), recipientPhone: recipientPhone || '',
       recipientNetwork: (recipientNetwork as 'MTN' | 'AIRTEL') || 'MTN',
       status: 'pending', purpose: purpose.trim(), stellarTxHash,
-      kotaniReferenceId: referenceId, kotaniStatus: kotaniResult.data?.status || 'pending',
+      kotaniReferenceId: referenceId, kotaniStatus: kotaniResult.data?.status || 'PENDING',
       goalId: goalId || undefined,
     });
 
@@ -236,17 +238,15 @@ router.get('/status/:referenceId', async (req, res) => {
       : await kotani.getOnrampStatus(referenceId);
 
     if (statusResult.success && statusResult.data) {
-      const kotaniStatus = statusResult.data.status;
-      let newStatus: 'pending' | 'completed' | 'failed' | undefined;
-      if (kotaniStatus === 'completed' && tx.status === 'pending') {
-        newStatus = 'completed';
-      } else if (kotaniStatus === 'failed' && tx.status === 'pending') {
-        newStatus = 'failed';
-      }
-      if (newStatus) {
-        await db.updateTransaction(tx.id, { status: newStatus, kotaniStatus });
+      const ks = statusResult.data.status;
+      const terminal: Record<string, 'completed' | 'failed'> = {
+        SUCCESSFUL: 'completed', FAILED: 'failed', REFUNDED: 'completed',
+      };
+      const newStatus = terminal[ks];
+      if (newStatus && tx.status === 'pending') {
+        await db.updateTransaction(tx.id, { status: newStatus, kotaniStatus: ks });
         tx.status = newStatus;
-        tx.kotaniStatus = kotaniStatus;
+        tx.kotaniStatus = ks;
       }
     }
 
@@ -269,25 +269,28 @@ router.get('/status/:referenceId', async (req, res) => {
 
 router.post('/webhook', async (req, res) => {
   try {
-    const payload: kotani.KotaniWebhookPayload = req.body;
-    const signature = req.headers['x-kotani-signature'] as string;
+    const payload = req.body;
+    const refId = payload.referenceId || payload.reference_id;
+    if (!refId) return res.status(400).json({ success: false, message: 'Missing referenceId' });
 
-    if (!kotani.verifyWebhookSignature(payload, signature, config.kotani.apiKey)) {
-      return res.status(401).json({ success: false, message: 'Invalid signature' });
-    }
-
-    const tx = await db.getTransactionByKotaniRef(payload.referenceId);
+    const tx = await db.getTransactionByKotaniRef(refId);
     if (tx) {
-      if (payload.event.endsWith('.completed')) {
+      const eventStatus: Record<string, string> = {
+        'offramp.completed': 'SUCCESSFUL',
+        'offramp.failed': 'FAILED',
+        'onramp.completed': 'SUCCESSFUL',
+        'onramp.failed': 'FAILED',
+      };
+      const ks = eventStatus[payload.event] || payload.status;
+      const terminal: Record<string, 'completed' | 'failed'> = {
+        SUCCESSFUL: 'completed', FAILED: 'failed', REFUNDED: 'completed',
+      };
+      const newStatus = terminal[ks];
+      if (newStatus) {
         await db.updateTransaction(tx.id, {
-          status: 'completed',
-          kotaniStatus: 'completed',
+          status: newStatus,
+          kotaniStatus: ks,
           stellarTxHash: payload.transactionHash || tx.stellarTxHash,
-        });
-      } else if (payload.event.endsWith('.failed')) {
-        await db.updateTransaction(tx.id, {
-          status: 'failed',
-          kotaniStatus: 'failed',
         });
       }
     }

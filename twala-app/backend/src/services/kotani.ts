@@ -366,7 +366,72 @@ export async function registerWebhook(url: string): Promise<KotaniResponse<any>>
 }
 
 // ---------------------------------------------------------------------------
-// 7. Health check
+// 7. Onramp — Fiat → Crypto (used by transfer route)
+// ---------------------------------------------------------------------------
+
+export interface OnrampData {
+  referenceId: string;
+  status: string;
+  fiatAmount: number;
+  cryptoAmount: number;
+  cryptoAmountSent: number;
+  feeInFiat: number;
+  feeInCrypto: number;
+  rate: number;
+  phoneNumber: string;
+  network: string;
+  transactionHash: string;
+  createdAt: string;
+}
+
+export async function createOnramp(params: {
+  referenceId: string;
+  fiatAmount: number;
+  currency: string;
+  chain: string;
+  token: string;
+  phoneNumber: string;
+  network: string;
+}): Promise<KotaniResponse<OnrampData>> {
+  if (!isLive()) {
+    await demoDelay();
+    const rate = 3750;
+    const fee = Math.max(params.fiatAmount * 0.02, 1000);
+    const cryptoAmount = (params.fiatAmount - fee) / rate;
+    return {
+      success: true, statusCode: 200, message: 'Onramp created (demo)',
+      data: {
+        referenceId: params.referenceId, status: 'PENDING',
+        fiatAmount: params.fiatAmount, cryptoAmount, cryptoAmountSent: cryptoAmount * 0.98,
+        feeInFiat: fee, feeInCrypto: fee / rate, rate,
+        phoneNumber: params.phoneNumber, network: params.network, transactionHash: '',
+        createdAt: new Date().toISOString(),
+      },
+    };
+  }
+  return apiCall<OnrampData>('POST', '/api/v3/onramp', {
+    referenceId: params.referenceId,
+    fiatAmount: params.fiatAmount,
+    currency: params.currency,
+    chain: params.chain,
+    token: params.token,
+    phoneNumber: params.phoneNumber,
+    network: params.network,
+  });
+}
+
+export async function getOnrampStatus(
+  referenceId: string,
+): Promise<KotaniResponse<OnrampData>> {
+  if (!isLive()) {
+    await demoDelay(300);
+    return { success: true, statusCode: 200, message: 'OK (demo)' };
+  }
+  return apiCall<OnrampData>('GET', `/api/v3/onramp/status/${referenceId}`);
+}
+
+// ---------------------------------------------------------------------------
+// 8. Health check
 // ---------------------------------------------------------------------------
 
 export async function healthCheck(): Promise<KotaniResponse<any>> {
