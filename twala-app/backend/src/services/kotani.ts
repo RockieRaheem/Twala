@@ -99,11 +99,19 @@ export interface KotaniWebhookPayload {
 // Demo mode helpers
 // ---------------------------------------------------------------------------
 
+export type OfframpCompletionCallback = (referenceId: string, status: 'completed' | 'failed') => void;
+
+let _onOfframpComplete: OfframpCompletionCallback | null = null;
+
+export function onOfframpComplete(cb: OfframpCompletionCallback): void {
+  _onOfframpComplete = cb;
+}
+
 function isDemoMode(): boolean {
   return !config.kotani.apiKey;
 }
 
-function demoDelay(ms = 800): Promise<void> {
+function demoDelay(ms = 600): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
@@ -141,15 +149,18 @@ export async function createOfframp(
     };
     demoOfframps.set(data.referenceId, data);
 
-    // Simulate completion after 15s
+    // Simulate completion after 5s
     setTimeout(() => {
       const stored = demoOfframps.get(data.referenceId);
       if (stored) {
         stored.status = 'completed';
         stored.completedAt = new Date().toISOString();
         demoOfframps.set(data.referenceId, stored);
+        if (_onOfframpComplete) {
+          _onOfframpComplete(data.referenceId, 'completed');
+        }
       }
-    }, 15000);
+    }, 5000);
 
     return { success: true, statusCode: 200, message: 'Offramp created successfully', data };
   }

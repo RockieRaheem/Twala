@@ -37,21 +37,28 @@ export async function getWallet(): Promise<WalletInfo | null> {
     .limit(1)
     .single();
 
-  if (error && error.code === 'PGRST116') return null; // no rows
+  if (error && error.code === 'PGRST116') return null;
   checkError(error, 'getWallet');
   if (!data) return null;
 
   return {
     publicKey: data.public_key,
     secretKey: data.secret_key,
-    balanceUsdc: 0,
-    balanceXlm: 0,
+    balanceUsdc: Number(data.balance_usdc || 0),
+    balanceXlm: Number(data.balance_xlm || 0),
     isFunded: data.is_funded,
   };
 }
 
+export async function updateWalletBalance(publicKey: string, balanceUsdc: number, balanceXlm: number): Promise<void> {
+  const { error } = await db()
+    .from('wallets')
+    .update({ balance_usdc: balanceUsdc.toFixed(7), balance_xlm: balanceXlm.toFixed(7), updated_at: new Date().toISOString() })
+    .eq('public_key', publicKey);
+  checkError(error, 'updateWalletBalance');
+}
+
 export async function saveWallet(wallet: WalletInfo): Promise<void> {
-  // Keep only one wallet
   const { error: delErr } = await db().from('wallets').delete().neq('id', '00000000-0000-0000-0000-000000000000');
   checkError(delErr, 'saveWallet (delete)');
 
@@ -59,6 +66,8 @@ export async function saveWallet(wallet: WalletInfo): Promise<void> {
     public_key: wallet.publicKey,
     secret_key: wallet.secretKey,
     is_funded: wallet.isFunded,
+    balance_usdc: wallet.balanceUsdc.toFixed(7),
+    balance_xlm: wallet.balanceXlm.toFixed(7),
   });
   checkError(insErr, 'saveWallet (insert)');
 }
@@ -320,6 +329,26 @@ export async function getTransactionStats(): Promise<{
     totalReceived: (receivedData || []).reduce((s, r) => s + Number(r.amount_usdc), 0),
     thisMonth: count || 0,
   };
+}
+
+export async function getPendingTransactions(): Promise<Transaction[]> {
+  const { data, error } = await db()
+    .from('transactions')
+    .select('*')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true })
+    .limit(20);
+  checkError(error, 'getPendingTransactions');
+  return (data || []).map(txRow);
+}
+
+export async function countPendingTransactions(): Promise<number> {
+  const { count, error } = await db()
+    .from('transactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'pending');
+  checkError(error, 'countPendingTransactions');
+  return count || 0;
 }
 
 function txRow(data: any): Transaction {

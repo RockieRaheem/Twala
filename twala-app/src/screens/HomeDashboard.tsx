@@ -3,7 +3,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useState, useCallback, useEffect } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 import type { AppScreen } from '../components/BottomNavBar';
-import { walletApi, ratesApi, historyApi, goalsApi, getChangeCounter, type GoalData } from '../services/api';
+import { walletApi, ratesApi, historyApi, goalsApi, eventsApi, type GoalData } from '../services/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -94,17 +94,20 @@ export default function HomeDashboard({ onNavigate, onNavigateGoal }: { onNaviga
 
   useEffect(() => { fetchData(); }, []);
 
-  // Poll for AI-triggered changes every 2s
+  // Poll for backend-triggered changes every 3s
   useEffect(() => {
-    const interval = setInterval(() => {
-      const latest = getChangeCounter();
-      if (latest !== changeVer) {
-        setChangeVer(latest);
-        fetchData();
-      }
-    }, 2000);
+    let lastVer = 0;
+    const interval = setInterval(async () => {
+      try {
+        const res = await eventsApi.version();
+        if (res.success && res.data && res.data.version !== lastVer) {
+          lastVer = res.data.version;
+          fetchData();
+        }
+      } catch { /* offline — skip */ }
+    }, 3000);
     return () => clearInterval(interval);
-  }, [changeVer, fetchData]);
+  }, [fetchData]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

@@ -2,6 +2,7 @@ import * as db from './database.js';
 import * as stellar from './stellar.js';
 import { getExchangeRate, calculateQuote } from './rates.js';
 import * as kotani from './kotani.js';
+import { notifyChange } from './events.js';
 import config from '../config.js';
 import type { ChatMessage, AiContext } from '../types/index.js';
 
@@ -256,10 +257,18 @@ async function executeToolCall(toolCall: any): Promise<string> {
         let stellarTxHash = '';
         try {
           await stellar.ensureTrustline(wallet.secretKey);
+          const destination = stellar.isValidPublicKey(KOTANI_ESCROW_ADDRESS)
+            ? KOTANI_ESCROW_ADDRESS
+            : config.stellar.usdcIssuer;
           stellarTxHash = await stellar.submitPayment(
-            wallet.secretKey, KOTANI_ESCROW_ADDRESS, quote.sendAmountUsdc.toFixed(7), referenceId,
+            wallet.secretKey, destination, quote.sendAmountUsdc.toFixed(7), referenceId,
           );
         } catch { stellarTxHash = `demo-${Date.now()}`; }
+
+        // Sync wallet balance after payment
+        const newBalance = await stellar.getBalance(wallet.publicKey);
+        await db.updateWalletBalance(wallet.publicKey, newBalance.usdc, newBalance.xlm);
+        notifyChange();
 
         const kotaniResult = await kotani.createOfframp({
           referenceId, cryptoAmount: quote.sendAmountUsdc, currency: 'UGX',
@@ -274,7 +283,7 @@ async function executeToolCall(toolCall: any): Promise<string> {
           kotaniStatus: kotaniResult.data?.status || 'pending',
         });
 
-        return `✅ **Sent ${usdc(quote.sendAmountUsdc)} to ${args.recipientName}!** Delivery: ~${fiat(quote.receiveAmountUgx)} UGX via ${network}. Fee: ${usdc(quote.feeUsdc)}. Ref: ${referenceId.slice(-8)}`;
+        return `✅ **Sent ${usdc(quote.sendAmountUsdc)} to ${args.recipientName}!** Delivery: ~${fiat(quote.receiveAmountUgx)} UGX via ${network}. Fee: ${usdc(quote.feeUsdc)}. Balance: ${usdc(newBalance.usdc)} remaining. Ref: ${referenceId.slice(-8)}`;
       }
 
       case 'update_goal': {

@@ -196,8 +196,13 @@ export default function SmartTransfer() {
       });
       setSubmitting(false);
       if (res.success) {
-        const goalMsg = selectedGoalId ? ' Funds also added to your savings goal.' : '';
-        Alert.alert('Transfer Submitted!', (res.data?.message || 'Your transfer is being processed.') + goalMsg);
+        const newBal = res.data?.balance;
+        const goalMsg = selectedGoalId ? '\n🎯 Funds added to your goal.' : '';
+        const balMsg = newBal !== undefined ? `\n💰 Wallet: $${newBal.toFixed(2)} USDC remaining.` : '';
+        Alert.alert(
+          '✅ Transfer Submitted!',
+          `${res.data?.message || 'Your transfer is being processed.'}${goalMsg}${balMsg}\n\nThe dashboard will update automatically.`
+        );
         setAmount('500');
         setRecipientName('');
         setRecipientPhone('');

@@ -3,6 +3,7 @@ import * as stellar from '../services/stellar.js';
 import * as kotani from '../services/kotani.js';
 import { getExchangeRate, calculateQuote } from '../services/rates.js';
 import * as db from '../services/database.js';
+import { notifyChange } from '../services/events.js';
 import config from '../config.js';
 
 const router = Router();
@@ -64,7 +65,7 @@ router.post('/offramp', async (req, res) => {
       return res.status(400).json({ success: false, message: 'No wallet found. Create a wallet first.' });
     }
 
-    // Validate balance via Stellar
+    // Validate balance via Stellar (live)
     const balance = await stellar.getBalance(wallet.publicKey);
     if (amountUsdc > balance.usdc) {
       return res.status(400).json({
@@ -78,28 +79,37 @@ router.post('/offramp', async (req, res) => {
     const quote = calculateQuote(amountUsdc, rate);
     const referenceId = kotani.generateReferenceId();
 
-    // Step 1: Submit USDC payment to Kotani Pay escrow on Stellar
+    // Step 1: Submit USDC payment — always a real Stellar tx so balance actually changes
     let stellarTxHash = '';
-
     try {
       await stellar.ensureTrustline(wallet.secretKey);
 
-      if (!stellar.isValidPublicKey(KOTANI_ESCROW_ADDRESS)) {
-        throw new Error('Invalid Kotani escrow address configured.');
-      }
+      // Use Kotani escrow if valid, otherwise send back to USDC issuer (demo mode)
+      const destination = stellar.isValidPublicKey(KOTANI_ESCROW_ADDRESS)
+        ? KOTANI_ESCROW_ADDRESS
+        : config.stellar.usdcIssuer;
 
+      if (!stellar.isValidPublicKey(destination)) {
+        throw new Error('No valid destination address configured.');
+      }
       stellarTxHash = await stellar.submitPayment(
         wallet.secretKey,
-        KOTANI_ESCROW_ADDRESS,
+        destination,
         quote.sendAmountUsdc.toFixed(7),
         referenceId
       );
     } catch (stellarErr) {
       const msg = stellarErr instanceof Error ? stellarErr.message : String(stellarErr);
+      console.warn(`  Stellar payment warning: ${msg}`);
       stellarTxHash = `demo-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     }
 
-    // Step 2: Submit offramp request to Kotani Pay
+    // Step 2: Sync wallet balance to DB after payment
+    const newBalance = await stellar.getBalance(wallet.publicKey);
+    await db.updateWalletBalance(wallet.publicKey, newBalance.usdc, newBalance.xlm);
+    notifyChange();
+
+    // Step 3: Submit offramp request to Kotani Pay
     const kotaniResult = await kotani.createOfframp({
       referenceId,
       cryptoAmount: quote.sendAmountUsdc,
@@ -109,7 +119,7 @@ router.post('/offramp', async (req, res) => {
       transactionHash: stellarTxHash,
     });
 
-    // Step 3: Create transaction record in DB
+    // Step 4: Create transaction record in DB
     const tx = await db.createTransaction({
       type: 'sent',
       amountUsdc: quote.sendAmountUsdc,
@@ -126,7 +136,7 @@ router.post('/offramp', async (req, res) => {
       goalId: goalId || undefined,
     });
 
-    // If goalId provided, also contribute the UGX amount to the goal
+    // If goalId provided, contribute the UGX amount to the goal
     if (goalId) {
       await db.contributeToGoal(goalId, quote.receiveAmountUgx);
     }
@@ -137,6 +147,7 @@ router.post('/offramp', async (req, res) => {
         transaction: tx,
         quote,
         kotaniReferenceId: referenceId,
+        balance: newBalance.usdc,
         message: `Sent $${quote.sendAmountUsdc.toFixed(2)} USDC → ${recipientName.trim()}. Delivering ~${quote.receiveAmountUgx.toLocaleString()} UGX via ${recipientNetwork || 'MTN'} Mobile Money. Reference: ${referenceId.slice(-8)}`,
       },
     });

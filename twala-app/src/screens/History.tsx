@@ -1,8 +1,8 @@
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
-import { historyApi, type TransactionItem } from '../services/api';
+import { historyApi, eventsApi, type TransactionItem } from '../services/api';
 
 const FILTERS = ['All', 'Sent', 'Received'];
 
@@ -38,19 +38,41 @@ export default function History() {
   const [txs, setTxs] = useState<TransactionItem[]>([]);
   const [stats, setStats] = useState({ totalSent: 0, totalReceived: 0, thisMonth: 0 });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchHistory = (f: string) => {
-    setLoading(true);
+  const fetchHistory = useCallback((f: string, isRefresh = false) => {
+    if (!isRefresh) setLoading(true);
     historyApi.list(f).then((res) => {
       if (res.success && res.data) {
         setTxs(res.data.transactions);
         setStats(res.data.stats);
       }
       setLoading(false);
-    });
-  };
+      setRefreshing(false);
+    }).catch(() => { setLoading(false); setRefreshing(false); });
+  }, []);
 
-  useEffect(() => { fetchHistory(filter); }, [filter]);
+  useEffect(() => { fetchHistory(filter); }, [filter, fetchHistory]);
+
+  // Auto-refresh when backend signals changes
+  useEffect(() => {
+    let lastVer = 0;
+    const interval = setInterval(async () => {
+      try {
+        const res = await eventsApi.version();
+        if (res.success && res.data && res.data.version !== lastVer) {
+          lastVer = res.data.version;
+          fetchHistory(filter, true);
+        }
+      } catch { /* skip */ }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [filter, fetchHistory]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchHistory(filter, true);
+  }, [filter, fetchHistory]);
 
   return (
     <View style={styles.container}>
@@ -61,7 +83,8 @@ export default function History() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterContent}>
           {FILTERS.map((f) => {
             const val = f.toLowerCase();

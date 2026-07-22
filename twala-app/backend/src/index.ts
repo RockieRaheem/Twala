@@ -12,6 +12,8 @@ import ratesRouter from './routes/rates.js';
 import kotaniRouter from './routes/kotani.js';
 import * as stellar from './services/stellar.js';
 import * as db from './services/database.js';
+import * as kotani from './services/kotani.js';
+import { notifyChange, getChangeVersion } from './services/events.js';
 
 function getLanIp(): string {
   const ifaces = os.networkInterfaces();
@@ -52,6 +54,11 @@ app.get('/api/health', async (_req, res) => {
   });
 });
 
+// GET /api/events/version — lightweight poll for detecting changes
+app.get('/api/events/version', (_req, res) => {
+  res.json({ success: true, data: { version: getChangeVersion() } });
+});
+
 app.use('/api/wallet', walletRouter);
 app.use('/api/transfer', transferRouter);
 app.use('/api/goals', goalsRouter);
@@ -59,6 +66,60 @@ app.use('/api/history', historyRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/rates', ratesRouter);
 app.use('/api/kotani', kotaniRouter);
+
+// ---------------------------------------------------------------------------
+// Kotani offramp completion listener — auto-completes demo mode transactions
+// ---------------------------------------------------------------------------
+
+kotani.onOfframpComplete(async (referenceId, status) => {
+  try {
+    const tx = await db.getTransactionByKotaniRef(referenceId);
+    if (tx && tx.status === 'pending') {
+      const newStatus = status === 'completed' ? 'completed' : 'failed';
+      await db.updateTransaction(tx.id, { status: newStatus, kotaniStatus: status });
+      notifyChange();
+      console.log(`  ✅ Kotani offramp ${referenceId.slice(-8)} → ${status}`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`  Kotani callback error: ${msg}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Background poller for pending transactions — catches stale demo offramps
+// ---------------------------------------------------------------------------
+
+setInterval(async () => {
+  try {
+    const pending = await db.countPendingTransactions();
+    if (pending > 0) {
+      const txs = await db.getPendingTransactions();
+      for (const tx of txs) {
+        if (tx.kotaniReferenceId) {
+          try {
+            const result = await kotani.getOfframpStatus(tx.kotaniReferenceId);
+            if (result.success && result.data) {
+              const newStatus = result.data.status;
+              if (newStatus === 'completed' && tx.status === 'pending') {
+                await db.updateTransaction(tx.id, { status: 'completed', kotaniStatus: 'completed' });
+                notifyChange();
+                console.log(`  ✅ Background: offramp ${tx.kotaniReferenceId.slice(-8)} completed`);
+              } else if (newStatus === 'failed' && tx.status === 'pending') {
+                await db.updateTransaction(tx.id, { status: 'failed', kotaniStatus: 'failed' });
+                console.log(`  ❌ Background: offramp ${tx.kotaniReferenceId.slice(-8)} failed`);
+              }
+            }
+          } catch { /* ignore poll errors */ }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+}, 10000); // poll every 10s
+
+// ---------------------------------------------------------------------------
+// Startup
+// ---------------------------------------------------------------------------
 
 app.listen(config.port, '0.0.0.0', async () => {
   console.log(`\n  🏦 Twala Backend running`);
@@ -95,6 +156,7 @@ app.listen(config.port, '0.0.0.0', async () => {
         await stellar.mintTestUsdc(existing.secretKey, config.testUsdc.initialMintAmount);
       }
       const fresh = await stellar.getBalance(existing.publicKey);
+      await db.updateWalletBalance(existing.publicKey, fresh.usdc, fresh.xlm);
       console.log(`  💰 Balance : $${fresh.usdc.toFixed(2)} USDC · ${fresh.xlm.toFixed(2)} XLM`);
     }
   } else {
@@ -117,6 +179,7 @@ app.listen(config.port, '0.0.0.0', async () => {
         await stellar.mintTestUsdc(wallet.secretKey, config.testUsdc.initialMintAmount);
 
         const balance = await stellar.getBalance(wallet.publicKey);
+        await db.updateWalletBalance(wallet.publicKey, balance.usdc, balance.xlm);
         console.log(`  💰 Balance : $${balance.usdc.toFixed(2)} USDC · ${balance.xlm.toFixed(2)} XLM`);
         if (balance.usdc > 0) {
           console.log(`  🎉 Wallet is ready for test transactions!`);

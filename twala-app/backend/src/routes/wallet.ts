@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as stellar from '../services/stellar.js';
 import * as db from '../services/database.js';
+import { notifyChange } from '../services/events.js';
 
 const router = Router();
 
@@ -57,6 +58,7 @@ router.get('/balance', async (_req, res) => {
       });
     }
     const balance = await stellar.getBalance(wallet.publicKey);
+    await db.updateWalletBalance(wallet.publicKey, balance.usdc, balance.xlm);
     res.json({
       success: true,
       data: {
@@ -79,6 +81,7 @@ router.get('/info', async (_req, res) => {
       return res.json({ success: true, data: null });
     }
     const balance = await stellar.getBalance(wallet.publicKey);
+    await db.updateWalletBalance(wallet.publicKey, balance.usdc, balance.xlm);
     res.json({
       success: true,
       data: {
@@ -139,6 +142,32 @@ router.post('/generate-keypair', (_req, res) => {
       message: 'Store this secret key securely. It will not be shown again.',
     },
   });
+});
+
+// POST /api/wallet/sync — force balance sync from Stellar to DB
+router.post('/sync', async (_req, res) => {
+  try {
+    const wallet = await db.getWallet();
+    if (!wallet) {
+      return res.json({ success: true, data: { balanceUsdc: 0, balanceXlm: 0, publicKey: null } });
+    }
+    const balance = await stellar.getBalance(wallet.publicKey);
+    await db.updateWalletBalance(wallet.publicKey, balance.usdc, balance.xlm);
+    const pending = await db.countPendingTransactions();
+    res.json({
+      success: true,
+      data: {
+        balanceUsdc: balance.usdc,
+        balanceXlm: balance.xlm,
+        publicKey: wallet.publicKey,
+        isFunded: wallet.isFunded,
+        pendingTransactions: pending,
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: msg });
+  }
 });
 
 export default router;

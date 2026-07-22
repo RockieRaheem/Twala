@@ -9,6 +9,8 @@ CREATE TABLE wallets (
   public_key TEXT NOT NULL,
   secret_key TEXT NOT NULL,
   is_funded BOOLEAN DEFAULT false,
+  balance_usdc NUMERIC(20,7) DEFAULT 0,
+  balance_xlm NUMERIC(20,7) DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -84,6 +86,10 @@ CREATE INDEX idx_chat_messages_created_at ON chat_messages(created_at ASC);
 CREATE INDEX idx_chat_messages_session_id ON chat_messages(session_id);
 CREATE INDEX idx_chat_sessions_last_message_at ON chat_sessions(last_message_at DESC);
 CREATE INDEX idx_goals_status ON goals(status);
+
+-- Migration for existing databases (run if columns don't exist):
+-- ALTER TABLE wallets ADD COLUMN IF NOT EXISTS balance_usdc NUMERIC(20,7) DEFAULT 0;
+-- ALTER TABLE wallets ADD COLUMN IF NOT EXISTS balance_xlm NUMERIC(20,7) DEFAULT 0;
 
 -- Disable RLS for all tables (single-user demo app)
 ALTER TABLE wallets DISABLE ROW LEVEL SECURITY;

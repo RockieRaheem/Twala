@@ -185,7 +185,7 @@ export const transferApi = {
     request<TransferQuote>(`/transfer/quote?amount=${amount}`),
 
   offramp: (body: { amountUsdc: number; recipientName: string; recipientPhone?: string; recipientNetwork?: string; purpose: string; goalId?: string }) =>
-    request<{ transaction: TransactionItem; quote: TransferQuote; kotaniReferenceId: string; message: string }>(
+    request<{ transaction: TransactionItem; quote: TransferQuote; kotaniReferenceId: string; balance: number; message: string }>(
       '/transfer/offramp', { method: 'POST', body: JSON.stringify(body) }
     ),
 
@@ -259,4 +259,12 @@ export const chatApi = {
 export const ratesApi = {
   get: () =>
     request<RateData>('/rates'),
+};
+
+export const eventsApi = {
+  version: () =>
+    request<{ version: number }>('/events/version', {}, 5000),
+
+  sync: () =>
+    request<{ balanceUsdc: number; balanceXlm: number; publicKey: string; isFunded: boolean }>('/wallet/balance'),
 };
