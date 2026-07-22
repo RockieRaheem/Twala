@@ -110,6 +110,14 @@ export interface ChatMsg {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
+  sessionId?: string;
+}
+
+export interface ChatSessionData {
+  id: string;
+  title: string;
+  createdAt: string;
+  lastMessageAt: string;
 }
 
 export interface NavigateAction {
@@ -221,11 +229,25 @@ export const goalsApi = {
 };
 
 export const chatApi = {
+  // Sessions
+  listSessions: () =>
+    request<ChatSessionData[]>('/chat/sessions'),
+
+  createSession: () =>
+    request<ChatSessionData>('/chat/sessions', { method: 'POST', body: JSON.stringify({}) }),
+
+  getSession: (id: string) =>
+    request<{ session: ChatSessionData; messages: ChatMsg[] }>(`/chat/sessions/${id}`),
+
+  deleteSession: (id: string) =>
+    request<{ success: boolean }>(`/chat/sessions/${id}`, { method: 'DELETE' }),
+
+  send: (sessionId: string, message: string) =>
+    request<{ messages: ChatMsg[]; navigate?: NavigateAction }>(`/chat/sessions/${sessionId}/send`, { method: 'POST', body: JSON.stringify({ message }) }, 25000),
+
+  // Legacy (keep for backward compat)
   list: () =>
     request<ChatMsg[]>('/chat'),
-
-  send: (message: string) =>
-    request<{ messages: ChatMsg[]; navigate?: NavigateAction }>('/chat', { method: 'POST', body: JSON.stringify({ message }) }, 25000),
 
   clear: () =>
     request<ChatMsg[]>('/chat', { method: 'DELETE' }),

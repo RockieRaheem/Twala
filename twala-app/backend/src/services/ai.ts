@@ -442,16 +442,16 @@ console.log(`  AI      : ${process.env.GEMINI_API_KEY ? 'Gemini ✓ (2.5 Flash)'
 // Public API — never throws
 // ---------------------------------------------------------------------------
 
-export async function chat(userMessage: string): Promise<{ messages: ChatMessage[]; navigate: { screen: string; goalId?: string } | null }> {
+export async function chat(userMessage: string, sessionId?: string): Promise<{ messages: ChatMessage[]; navigate: { screen: string; goalId?: string } | null }> {
   _pendingNavigate = null;
 
   // 1. Save user message (best-effort)
-  try { await db.addChatMessage({ role: 'user', content: userMessage }); } catch (e) { console.error('Failed to save user msg:', e); }
+  try { await db.addChatMessage({ role: 'user', content: userMessage, sessionId }); } catch (e) { console.error('Failed to save user msg:', e); }
 
-  // 2. Build context + get history
+  // 2. Build context + get session history
   const ctx = await buildContext();
   let history: ChatMessage[] = [];
-  try { history = await db.getChatMessages(); } catch (e) { console.error('Failed to load history:', e); }
+  try { history = await db.getChatMessages(sessionId); } catch (e) { console.error('Failed to load history:', e); }
 
   // 3. Try AI providers
   let reply: string | null = null;
@@ -471,11 +471,11 @@ export async function chat(userMessage: string): Promise<{ messages: ChatMessage
   }
 
   // 5. Save assistant reply
-  try { await db.addChatMessage({ role: 'assistant', content: reply }); } catch (e) { console.error('Failed to save reply:', e); }
+  try { await db.addChatMessage({ role: 'assistant', content: reply, sessionId }); } catch (e) { console.error('Failed to save reply:', e); }
 
-  // 6. Return messages
+  // 6. Return messages for the session
   let messages: ChatMessage[] = [];
-  try { messages = await db.getChatMessages(); } catch (e) { console.error('Failed to get messages:', e); }
+  try { messages = await db.getChatMessages(sessionId); } catch (e) { console.error('Failed to get messages:', e); }
 
   return { messages, navigate: _pendingNavigate };
 }

@@ -49,11 +49,20 @@ CREATE TABLE transactions (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Chat messages
+-- Chat sessions (conversations)
+CREATE TABLE chat_sessions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title TEXT NOT NULL DEFAULT 'New Chat',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  last_message_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Chat messages linked to a session
 CREATE TABLE chat_messages (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
   content TEXT NOT NULL,
+  session_id UUID REFERENCES chat_sessions(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -72,6 +81,8 @@ CREATE INDEX idx_transactions_type ON transactions(type);
 CREATE INDEX idx_transactions_status ON transactions(status);
 CREATE INDEX idx_transactions_kotani_ref ON transactions(kotani_reference_id);
 CREATE INDEX idx_chat_messages_created_at ON chat_messages(created_at ASC);
+CREATE INDEX idx_chat_messages_session_id ON chat_messages(session_id);
+CREATE INDEX idx_chat_sessions_last_message_at ON chat_sessions(last_message_at DESC);
 CREATE INDEX idx_goals_status ON goals(status);
 
 -- Disable RLS for all tables (single-user demo app)
@@ -79,4 +90,5 @@ ALTER TABLE wallets DISABLE ROW LEVEL SECURITY;
 ALTER TABLE goals DISABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_messages DISABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_sessions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE exchange_rates DISABLE ROW LEVEL SECURITY;
