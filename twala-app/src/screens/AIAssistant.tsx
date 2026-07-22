@@ -215,8 +215,8 @@ function renderRichText(content: string): React.ReactNode[] {
 
 const richStyles = StyleSheet.create({
   h1: { fontSize: Typography.headlineSm.fontSize, fontFamily: 'Montserrat', fontWeight: '700', color: Colors.primary, marginTop: 12, marginBottom: 4, lineHeight: 28 },
-  h2: { fontSize: Typography.headlineXs.fontSize, fontFamily: 'Montserrat', fontWeight: '700', color: Colors.primary, marginTop: 10, marginBottom: 3, lineHeight: 24 },
-  h3: { fontSize: Typography.labelLg.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurface, marginTop: 8, marginBottom: 2, lineHeight: 22 },
+  h2: { fontSize: 16, fontFamily: 'Montserrat', fontWeight: '700', color: Colors.primary, marginTop: 10, marginBottom: 3, lineHeight: 24 },
+  h3: { fontSize: 15, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurface, marginTop: 8, marginBottom: 2, lineHeight: 22 },
   paragraph: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.onSurface, lineHeight: 22, marginBottom: 4 },
   boldInline: { fontWeight: '700', fontFamily: 'Inter', color: Colors.primary },
   codeInline: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 13, backgroundColor: Colors.surfaceContainerHigh, color: Colors.tertiary, paddingHorizontal: 4, borderRadius: 4 },
