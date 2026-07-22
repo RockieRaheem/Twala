@@ -87,6 +87,15 @@ You can perform these actions via function calls — DO IT when asked:
 4. update_goal(goalId, title?, targetAmountUgx?, category?, status?, description?)
 5. delete_goal(goalId)
 6. navigate(screen, goalId?) — go to Dashboard | Goals | Transfer | History | GoalDetail
+7. update_transaction(transactionId, purpose)
+
+## Validation
+- If a goal is completed, never allow contributions to it — tell the user it's done
+- If a goal is cancelled, tell the user to create a new one instead
+- Before sending money, verify the wallet has enough USDC balance (shown above)
+- Check minimum (10 USDC) and maximum (5,000 USDC) transfer limits
+- Do not let the user send money to themselves
+- Proactively suggest better approaches when the user proposes something risky
 
 IMPORTANT: When calling functions that require a goalId, you MUST use the exact ID value shown after "ID:" in the Goals list above. Never make up a goalId — use the actual one from the context.
 
@@ -347,6 +356,13 @@ async function executeToolCall(toolCall: any): Promise<string> {
           dest = foundGoal ? `"${foundGoal.title}" details` : `your goal details`;
         }
         return `✅ Navigating to ${dest}...`;
+      }
+
+      case 'update_transaction': {
+        const tx = await db.getTransaction(args.transactionId);
+        if (!tx) return `❌ Transaction not found.`;
+        await db.updateTransaction(args.transactionId, { purpose: args.purpose } as any);
+        return `✅ Transaction purpose updated to "${args.purpose}".`;
       }
 
       default:
