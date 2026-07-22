@@ -51,8 +51,9 @@ export default function ProfileScreen({ onProfileReady }: Props) {
 
     setLoading(true);
     try {
-      const fn = mode === 'register' ? authApi.register : authApi.login;
-      const res = await fn(trimmedName || trimmedPhone, trimmedPhone, pin);
+      const res = mode === 'register'
+        ? await authApi.register(trimmedName, trimmedPhone, pin)
+        : await authApi.login(trimmedPhone, pin);
       if (res.success && res.data) {
         onProfileReady({ id: res.data.id, name: res.data.name, phone: res.data.phone });
       } else {
