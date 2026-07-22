@@ -3,6 +3,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 import { transferApi, ratesApi } from '../services/api';
+import DismissKeyboard from '../components/DismissKeyboard';
 
 type TransferMode = 'send' | 'deposit';
 
@@ -201,6 +202,7 @@ export default function SmartTransfer() {
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+        <DismissKeyboard>
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={styles.scrollContent}
@@ -441,6 +443,7 @@ export default function SmartTransfer() {
               )}
             </TouchableOpacity>
         </ScrollView>
+        </DismissKeyboard>
       </KeyboardAvoidingView>
     </View>
   );

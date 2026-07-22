@@ -1,8 +1,9 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Animated, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Animated, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, Keyboard } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 import { chatApi, isBackendOnline, notifyChange, type ChatMsg, type NavigateAction } from '../services/api';
+import DismissKeyboard from '../components/DismissKeyboard';
 
 // ---------------------------------------------------------------------------
 // Typing indicator
@@ -269,6 +270,8 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
 
   const onRefresh = useCallback(() => { setRefreshing(true); loadData(); }, [loadData]);
 
+  const inputRef = useRef<TextInput>(null);
+
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
     const userMsg = text.trim();
@@ -300,6 +303,7 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
     }
     if (sugRes.success && sugRes.data) setSuggestions(sugRes.data);
     setIsTyping(false);
+    inputRef.current?.blur();
   };
 
   return (
@@ -321,12 +325,14 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
         </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+        <DismissKeyboard>
         <ScrollView
           ref={scrollRef}
           style={styles.chatArea}
           contentContainerStyle={styles.chatContent}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
         >
@@ -414,18 +420,21 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
             </>
           )}
         </ScrollView>
+        </DismissKeyboard>
 
         <View style={styles.inputArea}>
           <View style={styles.inputRow}>
             <TextInput
+              ref={inputRef}
               style={styles.input}
               placeholder="Ask Kanzu anything..."
               placeholderTextColor={Colors.outline}
               value={message}
               onChangeText={setMessage}
               multiline
-              onSubmitEditing={() => sendMessage(message)}
               blurOnSubmit
+              returnKeyType="send"
+              onSubmitEditing={() => { if (message.trim()) sendMessage(message); }}
             />
             <TouchableOpacity
               style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
