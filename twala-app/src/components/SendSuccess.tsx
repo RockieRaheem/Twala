@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface, borderRadius: BorderRadius.xl * 1.5,
     width: '100%', maxWidth: 400,
     padding: Spacing.gutter,
-    ...Shadow.level3,
+    ...Shadow.level2,
   },
   checkSection: { alignItems: 'center', marginBottom: Spacing.gutter },
   checkCircle: {
