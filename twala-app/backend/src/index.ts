@@ -143,8 +143,8 @@ app.listen(config.port, '0.0.0.0', async () => {
   console.log(`  Network : ${config.stellar.network}`);
   console.log(`  Horizon : ${config.stellar.horizonUrl}`);
   console.log(`  Port    : ${config.port}`);
-  console.log(`  Kotani  : ${config.kotani.apiKey ? 'Configured ✓' : 'Demo mode'}`);
-  console.log(`  SMS     : ${config.africasTalking.apiKey ? `LIVE (${config.africasTalking.username})` : 'Demo mode (no AT key)'}`);
+  console.log(`  Kotani  : ${config.kotani.apiKey ? `LIVE (${config.kotani.useSandbox ? 'sandbox' : 'production'})` : 'Demo mode — set KOTANI_API_KEY'}`);
+  console.log(`  SMS     : ${config.africasTalking.apiKey ? `LIVE (${config.africasTalking.username})` : 'Demo mode — set AT_API_KEY'}`);
   const lanIp = getLanIp();
   console.log(`  Address : http://localhost:${config.port}`);
   console.log(`  LAN     : http://${lanIp}:${config.port}`);
