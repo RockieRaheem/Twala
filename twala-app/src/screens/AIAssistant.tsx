@@ -4,6 +4,10 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 import { chatApi, isBackendOnline, notifyChange, type ChatMsg, type NavigateAction } from '../services/api';
 
+// ---------------------------------------------------------------------------
+// Typing indicator
+// ---------------------------------------------------------------------------
+
 function TypingDots() {
   const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
 
@@ -26,10 +30,7 @@ function TypingDots() {
       {dots.map((dot, i) => (
         <Animated.View
           key={i}
-          style={[
-            typingStyles.dot,
-            { opacity: dot.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) },
-          ]}
+          style={[typingStyles.dot, { opacity: dot.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) }]}
         />
       ))}
     </View>
@@ -38,91 +39,204 @@ function TypingDots() {
 
 const typingStyles = StyleSheet.create({
   container: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8, paddingHorizontal: 4 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.onSurfaceVariant + '99' },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.primary + '99' },
 });
 
-// Parse simple markdown: ## heading, **bold**, newlines
+// ---------------------------------------------------------------------------
+// Professional markdown renderer
+// ---------------------------------------------------------------------------
+
+interface InlineSegment {
+  t: 'text' | 'bold' | 'code';
+  v: string;
+}
+
+function parseInline(text: string): InlineSegment[] {
+  const segments: InlineSegment[] = [];
+  let remaining = text;
+  let guard = 0;
+  while (remaining.length > 0 && guard < 30) {
+    guard++;
+    // bold **text**
+    const b = remaining.match(/\*\*(.+?)\*\*/);
+    // inline code `text`
+    const c = remaining.match(/`([^`]+)`/);
+    // pick whichever comes first
+    let first: RegExpMatchArray | null = null;
+    let type: 'bold' | 'code' = 'bold';
+    if (b && c) {
+      if (b.index! <= c.index!) { first = b; type = 'bold'; } else { first = c; type = 'code'; }
+    } else if (b) { first = b; type = 'bold'; } else if (c) { first = c; type = 'code'; }
+
+    if (first && first.index !== undefined) {
+      if (first.index > 0) segments.push({ t: 'text', v: remaining.substring(0, first.index) });
+      segments.push({ t: type, v: first[1] });
+      remaining = remaining.substring(first.index + first[0].length);
+    } else {
+      segments.push({ t: 'text', v: remaining });
+      remaining = '';
+    }
+  }
+  return segments;
+}
+
+function renderInline(segments: InlineSegment[], baseStyle: any, boldStyle: any, codeStyle: any): React.ReactNode[] {
+  return segments.map((s, i) => {
+    if (s.t === 'bold') return <Text key={i} style={boldStyle}>{s.v}</Text>;
+    if (s.t === 'code') return <Text key={i} style={codeStyle}>{s.v}</Text>;
+    return <Text key={i} style={baseStyle}>{s.v}</Text>;
+  });
+}
+
 function renderRichText(content: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   const lines = content.split('\n');
+  let inCodeBlock = false;
+  let codeBuffer: string[] = [];
+  let codeKey = 0;
 
-  lines.forEach((line, idx) => {
-    const trimmed = line.trim();
+  for (let idx = 0; idx < lines.length; idx++) {
+    const raw = lines[idx];
+    const trimmed = raw.trim();
 
-    if (!trimmed) {
-      nodes.push(<View key={`sp-${idx}`} style={{ height: 8 }} />);
-      return;
+    // Code block fence
+    if (trimmed.startsWith('```')) {
+      if (inCodeBlock) {
+        nodes.push(
+          <View key={`cb-${codeKey++}`} style={richStyles.codeBlock}>
+            <Text style={richStyles.codeText}>{codeBuffer.join('\n')}</Text>
+          </View>
+        );
+        codeBuffer = [];
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+      }
+      continue;
+    }
+    if (inCodeBlock) { codeBuffer.push(raw); continue; }
+
+    if (!trimmed) { nodes.push(<View key={`sp-${idx}`} style={{ height: 6 }} />); continue; }
+
+    // --- Horizontal rule
+    if (/^[-*_]{3,}$/.test(trimmed)) {
+      nodes.push(<View key={`hr-${idx}`} style={richStyles.hr} />);
+      continue;
     }
 
-    if (trimmed.startsWith('## ')) {
+    // --- Heading
+    const hm = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (hm) {
+      const level = hm[1].length;
       nodes.push(
-        <Text key={idx} style={richStyles.heading}>
-          {trimmed.replace('## ', '')}
+        <Text key={`h-${idx}`} style={level === 1 ? richStyles.h1 : level === 2 ? richStyles.h2 : richStyles.h3}>
+          {renderInline(parseInline(hm[2]), level === 1 ? richStyles.h1 : level === 2 ? richStyles.h2 : richStyles.h3, richStyles.boldInline, richStyles.codeInline)}
         </Text>
       );
-      return;
+      continue;
     }
 
-    // Split line into segments: **bold** and plain text
-    const segments: { bold: boolean; text: string }[] = [];
-    let remaining = trimmed;
-    let segIdx = 0;
-    while (remaining.length > 0 && segIdx < 20) {
-      segIdx++;
-      const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
-      if (boldMatch && boldMatch.index !== undefined) {
-        if (boldMatch.index > 0) segments.push({ bold: false, text: remaining.substring(0, boldMatch.index) });
-        segments.push({ bold: true, text: boldMatch[1] });
-        remaining = remaining.substring(boldMatch.index + boldMatch[0].length);
-      } else {
-        segments.push({ bold: false, text: remaining });
-        remaining = '';
-      }
-    }
-
-    // Check for emoji/list prefix
-    const hasEmojiPrefix = /^[✅⚠️❌🎯🎉💸💰🏠📋💱📅⏰●→←]\s/.test(trimmed) || /^[•·]/.test(trimmed);
-
-    nodes.push(
-      <Text key={idx} style={[richStyles.line, hasEmojiPrefix && { flexDirection: 'row' as any }]}>
-        {segments.map((seg, si) => (
-          <Text key={si} style={seg.bold ? richStyles.bold : richStyles.normal}>
-            {seg.text}
+    // --- Blockquote
+    if (trimmed.startsWith('> ')) {
+      nodes.push(
+        <View key={`bq-${idx}`} style={richStyles.blockquote}>
+          <Text style={richStyles.blockquoteText}>
+            {renderInline(parseInline(trimmed.replace(/^>\s?/, '')), richStyles.blockquoteText, richStyles.boldInline, richStyles.codeInline)}
           </Text>
-        ))}
+        </View>
+      );
+      continue;
+    }
+
+    // --- Unordered list
+    const ulMatch = trimmed.match(/^[-*•]\s+(.+)$/);
+    if (ulMatch) {
+      nodes.push(
+        <View key={`ul-${idx}`} style={richStyles.listRow}>
+          <Text style={richStyles.bullet}>•</Text>
+          <Text style={richStyles.listText}>
+            {renderInline(parseInline(ulMatch[1]), richStyles.listText, richStyles.boldInline, richStyles.codeInline)}
+          </Text>
+        </View>
+      );
+      continue;
+    }
+
+    // --- Ordered list
+    const olMatch = trimmed.match(/^(\d+)\.\s+(.+)$/);
+    if (olMatch) {
+      nodes.push(
+        <View key={`ol-${idx}`} style={richStyles.listRow}>
+          <Text style={richStyles.olBullet}>{olMatch[1]}.</Text>
+          <Text style={richStyles.listText}>
+            {renderInline(parseInline(olMatch[2]), richStyles.listText, richStyles.boldInline, richStyles.codeInline)}
+          </Text>
+        </View>
+      );
+      continue;
+    }
+
+    // --- Emoji / status prefix
+    const emojiMatch = trimmed.match(/^([✅❌⚠️🎯🎉💸💰🏠📋💱📅⏰🛡️💳🔒📊💡👋✨🔗🎓⭐]+)\s*/);
+    if (emojiMatch) {
+      const rest = trimmed.substring(emojiMatch[0].length);
+      const segs = parseInline(rest);
+      nodes.push(
+        <View key={`em-${idx}`} style={richStyles.emojiRow}>
+          <Text style={richStyles.emojiChar}>{emojiMatch[1]}</Text>
+          <Text style={richStyles.emojiText}>
+            {renderInline(segs, richStyles.emojiText, richStyles.boldInline, richStyles.codeInline)}
+          </Text>
+        </View>
+      );
+      continue;
+    }
+
+    // --- Regular paragraph
+    const segs = parseInline(trimmed);
+    nodes.push(
+      <Text key={`p-${idx}`} style={richStyles.paragraph}>
+        {renderInline(segs, richStyles.paragraph, richStyles.boldInline, richStyles.codeInline)}
       </Text>
     );
-  });
+  }
+
+  // Close unclosed code block
+  if (inCodeBlock && codeBuffer.length > 0) {
+    nodes.push(
+      <View key={`cb-${codeKey}`} style={richStyles.codeBlock}>
+        <Text style={richStyles.codeText}>{codeBuffer.join('\n')}</Text>
+      </View>
+    );
+  }
 
   return nodes;
 }
 
 const richStyles = StyleSheet.create({
-  heading: {
-    fontSize: Typography.headlineSm.fontSize,
-    fontFamily: 'Montserrat',
-    fontWeight: '700',
-    color: Colors.primary,
-    marginBottom: 4,
-    marginTop: 4,
-  },
-  line: {
-    fontSize: Typography.bodyMd.fontSize,
-    fontFamily: 'Inter',
-    color: Colors.onSurface,
-    lineHeight: 22,
-  },
-  bold: {
-    fontWeight: '700',
-    fontFamily: 'Inter',
-    color: Colors.primary,
-  },
-  normal: {
-    fontWeight: '400',
-    fontFamily: 'Inter',
-    color: Colors.onSurface,
-  },
+  h1: { fontSize: Typography.headlineSm.fontSize, fontFamily: 'Montserrat', fontWeight: '700', color: Colors.primary, marginTop: 12, marginBottom: 4, lineHeight: 28 },
+  h2: { fontSize: Typography.headlineXs.fontSize, fontFamily: 'Montserrat', fontWeight: '700', color: Colors.primary, marginTop: 10, marginBottom: 3, lineHeight: 24 },
+  h3: { fontSize: Typography.labelLg.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurface, marginTop: 8, marginBottom: 2, lineHeight: 22 },
+  paragraph: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.onSurface, lineHeight: 22, marginBottom: 4 },
+  boldInline: { fontWeight: '700', fontFamily: 'Inter', color: Colors.primary },
+  codeInline: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 13, backgroundColor: Colors.surfaceContainerHigh, color: Colors.tertiary, paddingHorizontal: 4, borderRadius: 4 },
+  codeBlock: { backgroundColor: Colors.surfaceContainerHigh, padding: 12, borderRadius: BorderRadius.lg, marginVertical: 6, borderWidth: 1, borderColor: Colors.outlineVariant + '4D' },
+  codeText: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 13, color: Colors.onSurface, lineHeight: 20 },
+  hr: { height: 1, backgroundColor: Colors.outlineVariant + '80', marginVertical: 10 },
+  blockquote: { borderLeftWidth: 3, borderLeftColor: Colors.primary + '80', paddingLeft: 12, marginVertical: 4, backgroundColor: Colors.surfaceContainerLow, paddingVertical: 8, paddingRight: 12, borderRadius: 4 },
+  blockquoteText: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onSurfaceVariant, lineHeight: 20, fontStyle: 'italic' },
+  listRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginVertical: 2, paddingLeft: 4 },
+  bullet: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.primary, lineHeight: 22, width: 10, textAlign: 'center' },
+  olBullet: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.primary, lineHeight: 22, minWidth: 20, textAlign: 'right' },
+  listText: { flex: 1, fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.onSurface, lineHeight: 22 },
+  emojiRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginVertical: 3, paddingLeft: 2 },
+  emojiChar: { fontSize: 16, lineHeight: 22, width: 22, textAlign: 'center' },
+  emojiText: { flex: 1, fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.onSurface, lineHeight: 22 },
 });
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 interface Props {
   onNavigate?: (screen: string) => void;
@@ -153,10 +267,7 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
 
   useEffect(() => { loadData(); }, []);
 
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    loadData();
-  }, [loadData]);
+  const onRefresh = useCallback(() => { setRefreshing(true); loadData(); }, [loadData]);
 
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
@@ -166,7 +277,6 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
     setError(null);
     setLocalMode(!isBackendOnline());
 
-    // Optimistically add user message locally
     const optimisticMsg: ChatMsg = { role: 'user', content: userMsg, timestamp: new Date().toISOString() };
     setMessages((prev) => [...prev, optimisticMsg]);
 
@@ -260,7 +370,7 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
                 msg.role === 'user' ? (
                   <View key={i} style={styles.userMessage}>
                     <Text style={styles.userMessageText}>{msg.content}</Text>
-                    <Text style={styles.messageTime}>
+                    <Text style={styles.userMsgTime}>
                       {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </Text>
                   </View>
@@ -272,7 +382,7 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
                     <View style={styles.aiBlock}>
                       <View style={styles.aiMessage}>
                         {renderRichText(msg.content)}
-                        <Text style={styles.messageTime}>
+                        <Text style={styles.aiMsgTime}>
                           {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </Text>
                       </View>
@@ -280,6 +390,7 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
                         <View style={styles.suggestedRow}>
                           {suggestions.slice(0, 4).map((reply) => (
                             <TouchableOpacity key={reply} style={styles.suggestedChip} activeOpacity={0.7} onPress={() => sendMessage(reply)}>
+                              <MaterialCommunityIcons name="flash-outline" size={12} color={Colors.primary} />
                               <Text style={styles.chipText}>{reply.length > 35 ? reply.substring(0, 32) + '...' : reply}</Text>
                             </TouchableOpacity>
                           ))}
@@ -343,7 +454,6 @@ const styles = StyleSheet.create({
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm },
   avatarPlaceholder: { width: 42, height: 42, borderRadius: 21, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center' },
-  onlineDot: { position: 'absolute', bottom: 0, right: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: Colors.primary, borderWidth: 2, borderColor: Colors.surface },
   headerTitle: { fontSize: Typography.headlineMd.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
   headerSub: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurfaceVariant },
   notifButton: { padding: 8, borderRadius: BorderRadius.full },
@@ -356,13 +466,14 @@ const styles = StyleSheet.create({
   quickActionLabel: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.primary },
   userMessage: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: Colors.primary, padding: Spacing.stackMd, borderRadius: 20, borderTopRightRadius: 4, ...Shadow.level1, marginBottom: Spacing.gutter },
   userMessageText: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.onPrimary },
-  messageTime: { fontSize: 10, color: Colors.onPrimary, opacity: 0.7, textAlign: 'right', marginTop: 4 },
+  userMsgTime: { fontSize: 10, color: Colors.onPrimary, opacity: 0.7, textAlign: 'right', marginTop: 4 },
   aiRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 8 },
   aiAvatarSmall: { width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.secondaryContainer, justifyContent: 'center', alignItems: 'center' },
   aiBlock: { flex: 1, gap: 8 },
   aiMessage: { backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: 20, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: Colors.outlineVariant + '1A', ...Shadow.level1 },
-  suggestedRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  suggestedChip: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: Colors.surfaceContainerLow, borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.primaryFixedDim + '4D', ...Shadow.level1 },
+  aiMsgTime: { fontSize: 10, color: Colors.onSurfaceVariant, opacity: 0.6, textAlign: 'right', marginTop: 6 },
+  suggestedRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  suggestedChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: Colors.surfaceContainerLow, borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.primaryFixedDim + '4D', ...Shadow.level1 },
   chipText: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.primary },
   typingBubble: { backgroundColor: Colors.surfaceContainerLowest, borderRadius: 20, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: Colors.outlineVariant + '1A', paddingHorizontal: 16, ...Shadow.level1 },
   inputArea: { paddingHorizontal: Spacing.containerPaddingMobile, paddingVertical: Spacing.stackSm, backgroundColor: Colors.background, borderTopWidth: 1, borderTopColor: Colors.outlineVariant + '4D' },
