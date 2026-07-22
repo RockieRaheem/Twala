@@ -185,8 +185,8 @@ export const transferApi = {
     request<TransferQuote>(`/transfer/quote?amount=${amount}`),
 
   offramp: (body: { amountUsdc: number; recipientName: string; recipientPhone?: string; recipientNetwork?: string; purpose: string; goalId?: string }) =>
-    request<{ transaction: TransactionItem; quote: TransferQuote; kotaniReferenceId: string; balance: number; message: string }>(
-      '/transfer/offramp', { method: 'POST', body: JSON.stringify(body) }
+    request<{ transaction: TransactionItem; quote: TransferQuote; kotaniReferenceId: string; balance: number; sms: { success: boolean; message: string } | null; message: string }>(
+      '/transfer/offramp', { method: 'POST', body: JSON.stringify(body) }, 30000
     ),
 
   onramp: (body: { fiatAmount: number; phoneNumber: string; network: string }) =>
