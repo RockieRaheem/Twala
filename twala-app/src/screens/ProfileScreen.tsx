@@ -177,7 +177,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.stackMd,
   },
   logoText: { fontSize: 36, fontFamily: 'Montserrat', fontWeight: '800', color: Colors.primary },
-  brandName: { fontSize: Typography.headlineLg.fontSize, fontFamily: 'Montserrat', fontWeight: '700', color: Colors.onPrimary },
+  brandName: { fontSize: Typography.displayLgMobile.fontSize, fontFamily: 'Montserrat', fontWeight: '700', color: Colors.onPrimary },
   tagline: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.primaryFixed, marginTop: 4 },
   card: {
     backgroundColor: Colors.surface, borderRadius: BorderRadius.xl * 1.5,
