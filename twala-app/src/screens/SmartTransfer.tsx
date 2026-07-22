@@ -7,7 +7,15 @@ import DismissKeyboard from '../components/DismissKeyboard';
 
 type TransferMode = 'send' | 'deposit';
 
-const PURPOSES = [
+interface PurposeOption {
+  label: string;
+  value: string;
+  icon: string;
+  desc: string;
+  goalId?: string;
+}
+
+const PURPOSES: PurposeOption[] = [
   { label: 'Family Support', value: 'family', icon: 'face-woman-profile' as const, desc: 'Send to parents or spouse' },
   { label: 'Construction Milestone', value: 'construction', icon: 'hard-hat' as const, desc: 'Release payment to contractor' },
   { label: 'Savings', value: 'savings', icon: 'piggy-bank' as const, desc: 'Deposit to your Twala Vault' },
@@ -98,7 +106,7 @@ const stellarStyles = StyleSheet.create({
 
 export default function SmartTransfer() {
   const [mode, setMode] = useState<TransferMode>('send');
-  const [selectedPurpose, setSelectedPurpose] = useState(PURPOSES[1]);
+  const [selectedPurpose, setSelectedPurpose] = useState<PurposeOption>(PURPOSES[1]);
   const [showPicker, setShowPicker] = useState(false);
   const [amount, setAmount] = useState('500');
   const [recipientName, setRecipientName] = useState('');
@@ -121,10 +129,10 @@ export default function SmartTransfer() {
   const usdAmount = parseFloat(amount) || 0;
 
   // Build dynamic purpose list: static purposes + user's goals
-  const goalPurposes = goals.map((g) => ({
+  const goalPurposes: PurposeOption[] = goals.map((g) => ({
     label: `🎯 ${g.title}`,
     value: `goal_${g.id}`,
-    icon: 'flag-checkered' as const,
+    icon: 'flag-checkered',
     desc: `Goal: ${g.savedAmountUgx.toLocaleString()} / ${g.targetAmountUgx.toLocaleString()} UGX`,
     goalId: g.id,
   }));
@@ -422,7 +430,7 @@ export default function SmartTransfer() {
                   <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Purpose</Text>
                   <TouchableOpacity style={styles.purposePicker} onPress={() => setShowPicker(!showPicker)}>
                     <View style={styles.purposeRow}>
-                      <MaterialCommunityIcons name={selectedPurpose.icon} size={20} color={Colors.primary} />
+                      <MaterialCommunityIcons name={selectedPurpose.icon as any} size={20} color={Colors.primary} />
                       <View style={styles.purposeTextWrap}>
                         <Text style={styles.purposeLabel}>{selectedPurpose.label}</Text>
                         <Text style={styles.purposeDesc}>{selectedPurpose.desc}</Text>
@@ -437,9 +445,9 @@ export default function SmartTransfer() {
                         <TouchableOpacity
                           key={p.value}
                           style={[styles.pickerItem, selectedPurpose.value === p.value && styles.pickerItemActive]}
-                          onPress={() => { setSelectedPurpose(p); setSelectedGoalId((p as any).goalId || null); setShowPicker(false); }}
+                          onPress={() => { setSelectedPurpose(p); setSelectedGoalId(p.goalId || null); setShowPicker(false); }}
                         >
-                          <MaterialCommunityIcons name={p.icon} size={20} color={selectedPurpose.value === p.value ? Colors.primary : Colors.onSurfaceVariant} />
+                          <MaterialCommunityIcons name={p.icon as any} size={20} color={selectedPurpose.value === p.value ? Colors.primary : Colors.onSurfaceVariant} />
                           <View>
                             <Text style={[styles.pickerLabel, selectedPurpose.value === p.value && { color: Colors.primary }]}>{p.label}</Text>
                             <Text style={styles.pickerDesc}>{p.desc}</Text>
