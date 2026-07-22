@@ -165,6 +165,11 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
     setIsTyping(true);
     setError(null);
     setLocalMode(!isBackendOnline());
+
+    // Optimistically add user message locally
+    const optimisticMsg: ChatMsg = { role: 'user', content: userMsg, timestamp: new Date().toISOString() };
+    setMessages((prev) => [...prev, optimisticMsg]);
+
     const [chatRes, sugRes] = await Promise.all([chatApi.send(userMsg), chatApi.suggestions()]);
     if (chatRes.success && chatRes.data) {
       const { messages: msgs, navigate } = chatRes.data as any;
@@ -180,7 +185,9 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
           onNavigate(nav.screen);
         }
       }
-    } else setError('Failed to send message. Please try again.');
+    } else {
+      setError(chatRes.message || 'Failed to send message. Please try again.');
+    }
     if (sugRes.success && sugRes.data) setSuggestions(sugRes.data);
     setIsTyping(false);
   };

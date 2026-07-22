@@ -19,21 +19,25 @@ let _pendingNavigate: { screen: string; goalId?: string } | null = null;
 // ---------------------------------------------------------------------------
 
 async function buildContext(): Promise<AiContext> {
-  const wallet = await db.getWallet();
-  const goals = await db.getGoals();
-  const { transactions } = await db.getTransactions({ limit: 5 });
+  try {
+    const wallet = await db.getWallet();
+    const goals = await db.getGoals();
+    const { transactions } = await db.getTransactions({ limit: 5 });
 
-  let liveBalance = 0;
-  if (wallet?.publicKey) {
-    try { const b = await stellar.getBalance(wallet.publicKey); liveBalance = b.usdc; } catch { /* 0 */ }
+    let liveBalance = 0;
+    if (wallet?.publicKey) {
+      try { const b = await stellar.getBalance(wallet.publicKey); liveBalance = b.usdc; } catch { }
+    }
+
+    return {
+      walletBalance: liveBalance,
+      goals,
+      recentTransactions: transactions,
+      activeGoal: goals.find((g) => g.status === 'active') || undefined,
+    };
+  } catch {
+    return { walletBalance: 0, goals: [], recentTransactions: [], activeGoal: undefined };
   }
-
-  return {
-    walletBalance: liveBalance,
-    goals,
-    recentTransactions: transactions,
-    activeGoal: goals.find((g) => g.status === 'active') || undefined,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -56,12 +60,11 @@ function percent(a: number, b: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// System prompt — KEPT SHORT to minimise token usage
+// System prompt
 // ---------------------------------------------------------------------------
 
 function buildSystemPrompt(ctx: AiContext): string {
-  const goalCount = ctx.goals.length;
-  const goalsBrief = goalCount > 0
+  const goalsBrief = ctx.goals.length > 0
     ? ctx.goals.map((g) =>
         `- "${g.title}" (${fiat(g.savedAmountUgx)}/${fiat(g.targetAmountUgx)}, ${percent(g.savedAmountUgx, g.targetAmountUgx)}%, id="${g.id}")`
       ).join('\n')
@@ -80,22 +83,19 @@ Goals:\n${goalsBrief}
 Recent txs:\n${txBrief}
 Rate: 1 USDC ≈ UGX 3,750 (0.5% fee, min $0.50)
 
-You can perform these actions via function calls — DO IT when asked, don't just describe it:
-1. create_goal(title, targetAmountUgx, category?, description?) — new goal
-2. contribute_to_goal(goalId, amountUgx) — add funds (records a tx)
-3. send_money(amountUsdc, recipientName, recipientPhone?, recipientNetwork?, purpose) — send via Mobile Money
-4. update_goal(goalId, title?, targetAmountUgx?, category?, status?, description?, milestones?) — edit goal
-5. delete_goal(goalId) — remove goal
+You can perform these actions via function calls — DO IT when asked:
+1. create_goal(title, targetAmountUgx, category?, description?)
+2. contribute_to_goal(goalId, amountUgx)
+3. send_money(amountUsdc, recipientName, recipientPhone?, recipientNetwork?, purpose)
+4. update_goal(goalId, title?, targetAmountUgx?, category?, status?, description?)
+5. delete_goal(goalId)
 6. navigate(screen, goalId?) — go to Dashboard | Goals | Transfer | History | GoalDetail
 
-Guidelines:
-- Execute immediately when asked. Explain what happened after.
-- Use markdown. Be warm and helpful.
-- Always use real data — never fabricate.`;
+Be warm and helpful. Use markdown. Never fabricate data.`;
 }
 
 // ---------------------------------------------------------------------------
-// Tools (Groq function calling)
+// Tools
 // ---------------------------------------------------------------------------
 
 const TOOLS: any[] = [
@@ -143,7 +143,7 @@ const TOOLS: any[] = [
           recipientName: { type: 'string', description: 'Recipient full name' },
           recipientPhone: { type: 'string', description: 'Phone (e.g. +256...)' },
           recipientNetwork: { type: 'string', enum: ['MTN', 'AIRTEL'], description: 'Mobile network: MTN or AIRTEL' },
-          purpose: { type: 'string', description: 'Purpose (e.g. "Family Support", "Land Payment")' },
+          purpose: { type: 'string', description: 'Purpose (e.g. "Family Support")' },
         },
         required: ['amountUsdc', 'recipientName', 'purpose'],
       },
@@ -153,7 +153,7 @@ const TOOLS: any[] = [
     type: 'function',
     function: {
       name: 'update_goal',
-      description: 'Update an existing goal (title, target, category, status, description, milestones)',
+      description: 'Update an existing goal',
       parameters: {
         type: 'object',
         properties: {
@@ -189,7 +189,7 @@ const TOOLS: any[] = [
         type: 'object',
         properties: {
           screen: { type: 'string', enum: ['Dashboard', 'Goals', 'Transfer', 'History', 'GoalDetail'], description: 'The screen to navigate to' },
-          goalId: { type: 'string', description: 'Goal ID (required only when screen is GoalDetail)' },
+          goalId: { type: 'string', description: 'Goal ID (for GoalDetail)' },
         },
         required: ['screen'],
       },
@@ -304,41 +304,32 @@ async function executeToolCall(toolCall: any): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Gemini (text-only)
+// Gemini
 // ---------------------------------------------------------------------------
-
-function buildGeminiContents(history: ChatMessage[], userMessage: string): any[] {
-  const contents: any[] = [];
-  for (const msg of history.slice(-10)) {
-    contents.push({
-      role: msg.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: msg.content }],
-    });
-  }
-  contents.push({ role: 'user', parts: [{ text: userMessage }] });
-  return contents;
-}
 
 async function callGemini(userMessage: string, ctx: AiContext, history: ChatMessage[]): Promise<string | null> {
   const key = GEMINI_API_KEY();
   if (!key) return null;
   try {
+    const contents: any[] = [];
+    for (const msg of history.slice(-10)) {
+      contents.push({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+      });
+    }
+    contents.push({ role: 'user', parts: [{ text: userMessage }] });
+
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(25000),
+        signal: AbortSignal.timeout(20000),
         body: JSON.stringify({
           system_instruction: { parts: [{ text: buildSystemPrompt(ctx) }] },
-          contents: buildGeminiContents(history, userMessage),
+          contents,
           generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-          safetySettings: [
-            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
-            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
-            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
-            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
-          ],
         }),
       }
     );
@@ -349,13 +340,29 @@ async function callGemini(userMessage: string, ctx: AiContext, history: ChatMess
 }
 
 // ---------------------------------------------------------------------------
-// Groq — returns string | null (null = all models exhausted)
+// Groq
 // ---------------------------------------------------------------------------
 
 async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessage[]): Promise<string | null> {
   const key = GROQ_API_KEY();
   if (!key) return null;
 
+  for (const model of GROQ_MODELS) {
+    try {
+      const result = await tryGroqModel(model, key, userMessage, ctx, history);
+      if (result !== null) return result;
+    } catch (err) {
+      console.error(`Groq ${model} error:`, err);
+    }
+    console.warn(`  Groq ${model} failed, trying next...`);
+  }
+
+  return null;
+}
+
+async function tryGroqModel(
+  model: string, key: string, userMessage: string, ctx: AiContext, history: ChatMessage[],
+): Promise<string | null> {
   const messages: any[] = [
     { role: 'system', content: buildSystemPrompt(ctx) },
   ];
@@ -364,76 +371,58 @@ async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessag
   }
   messages.push({ role: 'user', content: userMessage });
 
-  for (const model of GROQ_MODELS) {
-    const result = await tryGroqModel(model, key, messages);
-    if (result !== null) return result;
-    console.warn(`  Groq ${model} exhausted, trying next...`);
-  }
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    signal: AbortSignal.timeout(20000),
+    body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', temperature: 0.7, max_tokens: 1024 }),
+  });
 
-  return null;
-}
-
-async function tryGroqModel(model: string, key: string, messages: any[]): Promise<string | null> {
-  try {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      signal: AbortSignal.timeout(30000),
-      body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', temperature: 0.7, max_tokens: 1024, top_p: 0.95 }),
-    });
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      if (response.status === 429) {
-        return null;
-      }
-      if (response.status === 400 && body.includes('tool call validation')) {
-        const text = await tryGroqTextFallback(model, key, messages);
-        return text;
-      }
-      console.error(`Groq ${model} error ${response.status}:`, body);
-      return null;
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    if (response.status === 429) return null;
+    if (response.status === 400 && body.includes('tool call validation')) {
+      return await tryGroqText(model, key, messages);
     }
-
-    const data: any = await response.json();
-    const choice = data?.choices?.[0]?.message;
-    if (!choice) return null;
-
-    if (!choice.tool_calls || choice.tool_calls.length === 0) {
-      return choice.content?.trim() || null;
-    }
-
-    const toolResults: string[] = [];
-    for (const toolCall of choice.tool_calls) {
-      const result = await executeToolCall(toolCall);
-      toolResults.push(result);
-      messages.push({ role: 'assistant', content: null, tool_calls: [toolCall] });
-      messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
-    }
-
-    const finalRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      signal: AbortSignal.timeout(30000),
-      body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1024, top_p: 0.95 }),
-    });
-
-    if (!finalRes.ok) return toolResults.join('\n\n');
-    const finalData: any = await finalRes.json();
-    return finalData?.choices?.[0]?.message?.content?.trim() || toolResults.join('\n\n');
-  } catch (err) {
-    console.error(`Groq ${model} fail:`, err);
+    console.error(`Groq ${model} ${response.status}:`, body);
     return null;
   }
+
+  const data: any = await response.json();
+  const choice = data?.choices?.[0]?.message;
+  if (!choice) return null;
+
+  if (!choice.tool_calls || choice.tool_calls.length === 0) {
+    return choice.content || null;
+  }
+
+  const toolResults: string[] = [];
+  for (const toolCall of choice.tool_calls) {
+    const result = await executeToolCall(toolCall);
+    toolResults.push(result);
+    messages.push({ role: 'assistant', content: null, tool_calls: [toolCall] });
+    messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
+  }
+
+  const finalRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    signal: AbortSignal.timeout(20000),
+    body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1024 }),
+  });
+
+  if (!finalRes.ok) return toolResults.join('\n\n');
+  const finalData: any = await finalRes.json();
+  return finalData?.choices?.[0]?.message?.content?.trim() || toolResults.join('\n\n');
 }
 
-async function tryGroqTextFallback(model: string, key: string, messages: any[]): Promise<string | null> {
+async function tryGroqText(model: string, key: string, messages: any[]): Promise<string | null> {
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      signal: AbortSignal.timeout(30000),
-      body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1024, top_p: 0.95 }),
+      signal: AbortSignal.timeout(20000),
+      body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1024 }),
     });
     if (!res.ok) return null;
     const data: any = await res.json();
@@ -442,41 +431,51 @@ async function tryGroqTextFallback(model: string, key: string, messages: any[]):
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Startup log
+// ---------------------------------------------------------------------------
+
+console.log(`  AI      : ${GEMINI_API_KEY() ? 'Gemini ✓' : 'Gemini ✗'} | ${GROQ_API_KEY() ? `Groq ✓ (${GROQ_MODELS.join(', ')})` : 'Groq ✗'}`);
+
+// ---------------------------------------------------------------------------
+// Public API — EVERYTHING wrapped in try/catch so it NEVER throws
 // ---------------------------------------------------------------------------
 
 export async function chat(userMessage: string): Promise<{ messages: ChatMessage[]; navigate: { screen: string; goalId?: string } | null }> {
   _pendingNavigate = null;
 
-  const ctx = await buildContext();
-  const history = await db.getChatMessages();
+  // 1. Save user message (best effort)
+  try { await db.addChatMessage({ role: 'user', content: userMessage }); } catch (e) { console.error('Failed to save user msg:', e); }
 
+  // 2. Build context
+  const ctx = await buildContext();
+
+  // 3. Get fresh history
+  let history: ChatMessage[] = [];
+  try { history = await db.getChatMessages(); } catch (e) { console.error('Failed to get history:', e); }
+
+  // 4. Try AI providers
   let reply: string | null = null;
 
-  // Try Groq with all models
   if (GROQ_API_KEY()) {
-    reply = await callGroq(userMessage, ctx, history);
+    try { reply = await callGroq(userMessage, ctx, history); } catch (e) { console.error('Groq exception:', e); }
   }
 
-  // Fallback to Gemini if Groq failed
   if (!reply && GEMINI_API_KEY()) {
-    reply = await callGemini(userMessage, ctx, history);
+    try { reply = await callGemini(userMessage, ctx, history); } catch (e) { console.error('Gemini exception:', e); }
   }
 
+  // 5. Fallback if all providers failed
   if (!reply) {
-    throw new Error('AI service unavailable — all providers failed or rate limited');
+    reply = "I'm sorry, I'm having trouble connecting right now due to rate limits. Please try again in a moment. In the meantime, you can use the Goals and Transfer tabs directly.";
+    console.warn('  AI: All providers failed, using fallback message');
   }
 
-  // Check if a navigate tool was called
-  if (_pendingNavigate) {
-    // Inject navigate info into reply so frontend can pick it up
-    // The reply itself will mention the navigation
-  }
+  // 6. Save reply
+  try { await db.addChatMessage({ role: 'assistant', content: reply }); } catch (e) { console.error('Failed to save reply:', e); }
 
-  await db.addChatMessage({ role: 'user', content: userMessage });
-  await db.addChatMessage({ role: 'assistant', content: reply });
-
-  const messages = await db.getChatMessages();
+  // 7. Return messages
+  let messages: ChatMessage[] = [];
+  try { messages = await db.getChatMessages(); } catch (e) { console.error('Failed to get final messages:', e); }
 
   return { messages, navigate: _pendingNavigate };
 }
