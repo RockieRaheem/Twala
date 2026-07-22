@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 // Connection management
 // ---------------------------------------------------------------------------
 
-const LAN_IP = process.env.EXPO_PUBLIC_LAN_IP || '192.168.1.153';
+const LAN_IP = process.env.EXPO_PUBLIC_LAN_IP || '172.20.10.12';
 
 const LOCAL_DEV = Platform.OS === 'web'
   ? 'http://localhost:4000/api'

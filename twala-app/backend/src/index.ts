@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import os from 'os';
 import express from 'express';
 import cors from 'cors';
 import config from './config.js';
@@ -11,6 +12,16 @@ import ratesRouter from './routes/rates.js';
 import kotaniRouter from './routes/kotani.js';
 import * as stellar from './services/stellar.js';
 import * as db from './services/database.js';
+
+function getLanIp(): string {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return '127.0.0.1';
+}
 
 const app = express();
 
@@ -56,7 +67,9 @@ app.listen(config.port, '0.0.0.0', async () => {
   console.log(`  Horizon : ${config.stellar.horizonUrl}`);
   console.log(`  Port    : ${config.port}`);
   console.log(`  Kotani  : ${config.kotani.apiKey ? 'Configured ✓' : 'Demo mode'}`);
+  const lanIp = getLanIp();
   console.log(`  Address : http://localhost:${config.port}`);
+  console.log(`  LAN     : http://${lanIp}:${config.port}`);
   console.log(`  API     : http://localhost:${config.port}/api/health\n`);
 
   // Step 1: Initialize test USDC issuer
