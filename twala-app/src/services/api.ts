@@ -191,7 +191,7 @@ export const transferApi = {
   quote: (amount: number) =>
     request<TransferQuote>(`/transfer/quote?amount=${amount}`),
 
-  offramp: (body: { amountUsdc: number; recipientName: string; recipientPhone?: string; recipientNetwork?: string; purpose: string; goalId?: string }) =>
+  offramp: (body: { amountUsdc: number; recipientName: string; recipientPhone?: string; recipientNetwork?: string; purpose: string; goalId?: string; senderName?: string }) =>
     request<{ transaction: TransactionItem; quote: TransferQuote; kotaniReferenceId: string; balance: number; sms: { success: boolean; message: string } | null; message: string }>(
       '/transfer/offramp', { method: 'POST', body: JSON.stringify(body) }, 30000
     ),
@@ -266,6 +266,20 @@ export const chatApi = {
 export const ratesApi = {
   get: () =>
     request<RateData>('/rates'),
+};
+
+export const authApi = {
+  register: (name: string, phone: string, pin: string) =>
+    request<UserProfile>('/auth/register', { method: 'POST', body: JSON.stringify({ name, phone, pin }) }),
+
+  login: (phone: string, pin: string) =>
+    request<UserProfile>('/auth/login', { method: 'POST', body: JSON.stringify({ phone, pin }) }),
+
+  profile: (id: string) =>
+    request<UserProfile>(`/auth/profile/${id}`),
+
+  check: (phone: string) =>
+    request<{ exists: boolean }>(`/auth/check/${phone}`),
 };
 
 export const eventsApi = {

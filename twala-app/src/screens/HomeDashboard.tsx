@@ -51,7 +51,7 @@ function getTimeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-export default function HomeDashboard({ onNavigate, onNavigateGoal }: { onNavigate: (route: AppScreen) => void; onNavigateGoal?: (id: string) => void }) {
+export default function HomeDashboard({ onNavigate, onNavigateGoal, user }: { onNavigate: (route: AppScreen) => void; onNavigateGoal?: (id: string) => void; user?: { id: string; name: string; phone: string } }) {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -143,7 +143,7 @@ export default function HomeDashboard({ onNavigate, onNavigateGoal }: { onNaviga
 
         <View style={styles.welcomeSection}>
           <Text style={styles.welcomeSub}>{getGreeting()},</Text>
-          <Text style={styles.welcomeName}>Welcome</Text>
+          <Text style={styles.welcomeName}>{user?.name || 'Welcome'}</Text>
           <Text style={styles.welcomeTagline}>Your financial journey continues here</Text>
         </View>
 

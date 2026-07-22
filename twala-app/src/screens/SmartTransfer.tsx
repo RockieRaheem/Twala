@@ -105,7 +105,11 @@ const stellarStyles = StyleSheet.create({
   footer: { marginTop: Spacing.gutter, textAlign: 'center', fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.primaryFixed },
 });
 
-export default function SmartTransfer() {
+interface Props {
+  user?: { id: string; name: string; phone: string };
+}
+
+export default function SmartTransfer({ user }: Props = {}) {
   const [mode, setMode] = useState<TransferMode>('send');
   const [selectedPurpose, setSelectedPurpose] = useState<PurposeOption>(PURPOSES[1]);
   const [showPicker, setShowPicker] = useState(false);
@@ -204,6 +208,7 @@ export default function SmartTransfer() {
           recipientNetwork,
           purpose: selectedPurpose.label,
           goalId: selectedGoalId || undefined,
+          senderName: user?.name,
         });
         if (res.success && res.data) {
           const g = goals.find((x) => x.id === selectedGoalId);

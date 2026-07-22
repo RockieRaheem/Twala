@@ -7,21 +7,37 @@ import AIAssistant from '../screens/AIAssistant';
 import SmartTransfer from '../screens/SmartTransfer';
 import GoalDetail from '../screens/GoalDetail';
 import History from '../screens/History';
+import ProfileScreen from '../screens/ProfileScreen';
 import BottomNavBar, { AppScreen } from '../components/BottomNavBar';
 import { Colors } from '../theme';
 
+interface UserProfile {
+  id: string;
+  name: string;
+  phone: string;
+}
+
 export default function AppNavigator() {
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('Dashboard');
-  const [history, setHistory] = useState<AppScreen[]>([]);
+  const [navHistory, setNavHistory] = useState<AppScreen[]>([]);
   const [goalId, setGoalId] = useState<string | null>(null);
+
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ProfileScreen onProfileReady={(p) => setUser(p)} />
+      </SafeAreaView>
+    );
+  }
 
   const navigate = (screen: AppScreen) => {
     if (screen === 'GoalDetail') {
-      setHistory((prev) => [...prev, currentScreen]);
+      setNavHistory((prev) => [...prev, currentScreen]);
       setCurrentScreen('GoalDetail');
     } else if (screen === 'Dashboard') {
       setCurrentScreen('Dashboard');
-      setHistory([]);
+      setNavHistory([]);
     } else {
       setCurrentScreen(screen);
     }
@@ -29,15 +45,15 @@ export default function AppNavigator() {
 
   const navigateToGoal = (id: string) => {
     setGoalId(id);
-    setHistory((prev) => [...prev, currentScreen]);
+    setNavHistory((prev) => [...prev, currentScreen]);
     setCurrentScreen('GoalDetail');
   };
 
   const handleBack = () => {
     setGoalId(null);
-    const prev = history[history.length - 1];
+    const prev = navHistory[navHistory.length - 1];
     if (prev) {
-      setHistory((prevH) => prevH.slice(0, -1));
+      setNavHistory((prevH) => prevH.slice(0, -1));
       setCurrentScreen(prev);
     }
   };
@@ -45,19 +61,19 @@ export default function AppNavigator() {
   const renderScreen = () => {
     switch (currentScreen) {
       case 'Dashboard':
-        return <HomeDashboard onNavigate={navigate} onNavigateGoal={navigateToGoal} />;
+        return <HomeDashboard onNavigate={navigate} onNavigateGoal={navigateToGoal} user={user} />;
       case 'Goals':
         return <Goals onNavigateGoal={navigateToGoal} />;
       case 'Assistant':
         return <AIAssistant onNavigate={(s) => navigate(s as AppScreen)} onNavigateGoal={navigateToGoal} />;
       case 'Transfer':
-        return <SmartTransfer />;
+        return <SmartTransfer user={user} />;
       case 'GoalDetail':
         return <GoalDetail goalId={goalId} onBack={handleBack} />;
       case 'History':
         return <History />;
       default:
-        return <HomeDashboard onNavigate={navigate} onNavigateGoal={navigateToGoal} />;
+        return <HomeDashboard onNavigate={navigate} onNavigateGoal={navigateToGoal} user={user} />;
     }
   };
 
@@ -76,11 +92,6 @@ export default function AppNavigator() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  content: {
-    flex: 1,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
+  content: { flex: 1 },
 });
