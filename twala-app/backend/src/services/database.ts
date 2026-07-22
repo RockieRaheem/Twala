@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, PostgrestError } from '@supabase/supabase-js';
-import type { WalletInfo, Transaction, Goal, ChatMessage, ExchangeRate } from '../types/index.js';
+import type { WalletInfo, Transaction, Goal, ChatMessage, ChatSession, ExchangeRate } from '../types/index.js';
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
