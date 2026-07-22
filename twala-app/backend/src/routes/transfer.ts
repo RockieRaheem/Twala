@@ -148,7 +148,7 @@ router.post('/offramp', async (req, res) => {
         kotaniReferenceId: referenceId,
         balance: newBalance.usdc,
         sms: null, // SMS sent async, check logs
-        message: `Sent $${quote.sendAmountUsdc.toFixed(2)} USDC → ${recipientName.trim()}. Delivering ~${quote.receiveAmountUgx.toLocaleString()} UGX via ${recipientNetwork || 'MTN'} Mobile Money. Reference: ${referenceId.slice(-8)}`,
+        message: `${quote.receiveAmountUgx.toLocaleString()} UGX sent to ${recipientName.trim()} via ${recipientNetwork || 'MTN'} Mobile Money. Reference: ${referenceId.slice(-8)}`,
       },
     });
   } catch (err) {

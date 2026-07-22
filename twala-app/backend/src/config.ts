@@ -16,7 +16,7 @@ const config = {
   africasTalking: {
     username: process.env.AT_USERNAME || 'sandbox',
     apiKey: process.env.AT_API_KEY || '',
-    senderId: process.env.AT_SENDER_ID || 'TWALA',
+    senderId: process.env.AT_SENDER_ID || 'TWAALA',
     // OpenAPI spec: sandbox → api.sandbox.africastalking.com, production → api.africastalking.com
     get baseUrl(): string {
       return this.username === 'sandbox'

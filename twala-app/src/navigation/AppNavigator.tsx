@@ -69,7 +69,7 @@ export default function AppNavigator() {
       case 'Transfer':
         return <SmartTransfer user={user} />;
       case 'GoalDetail':
-        return <GoalDetail goalId={goalId} onBack={handleBack} />;
+        return <GoalDetail goalId={goalId} onBack={handleBack} onNavigate={navigate} />;
       case 'History':
         return <History />;
       default:

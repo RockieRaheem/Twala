@@ -73,7 +73,7 @@ function buildSystemPrompt(ctx: AiContext): string {
       ).join('\n')
     : '(none)';
 
-  return `You are Kanzu, an AI financial companion for Twala — USDC → Mobile Money for Uganda.
+  return `You are Twaala, an AI financial companion for cross-border payments to Uganda.
 
 Wallet: ${usdc(ctx.walletBalance)} USDC
 Goals:\n${goalsBrief}

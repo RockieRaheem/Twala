@@ -124,7 +124,7 @@ function nextDemoRefId(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Offramp — USDC → Mobile Money (Twala → Uganda)
+// Offramp — USDC → Mobile Money
 // ---------------------------------------------------------------------------
 
 export async function createOfframp(
@@ -211,7 +211,7 @@ export async function getOfframpStatus(
 }
 
 // ---------------------------------------------------------------------------
-// Onramp — Mobile Money → USDC (Uganda → Twala)
+// Onramp — Mobile Money → USDC
 // ---------------------------------------------------------------------------
 
 export async function createOnramp(

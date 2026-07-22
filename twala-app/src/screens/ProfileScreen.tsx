@@ -71,8 +71,8 @@ export default function ProfileScreen({ onProfileReady }: Props) {
           <View style={styles.logoCircle}>
             <Text style={styles.logoText}>T</Text>
           </View>
-          <Text style={styles.brandName}>Twala</Text>
-          <Text style={styles.tagline}>Cross-border payments to Uganda</Text>
+          <Text style={styles.brandName}>Twaala</Text>
+          <Text style={styles.tagline}>Send money to Uganda — fast & secure</Text>
         </View>
 
         <View style={styles.card}>

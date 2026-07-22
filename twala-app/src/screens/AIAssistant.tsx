@@ -457,7 +457,7 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
             <MaterialCommunityIcons name="menu" size={24} color={Colors.primary} />
           </TouchableOpacity>
           <View style={styles.headerInfo}>
-            <Text style={styles.headerTitle}>Kanzu</Text>
+            <Text style={styles.headerTitle}>Twaala</Text>
             {activeSession && (
               <Text style={styles.headerSessionTitle} numberOfLines={1}>{activeSession.title}</Text>
             )}
@@ -563,7 +563,7 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
             <TextInput
               ref={inputRef}
               style={styles.input}
-              placeholder="Ask Kanzu anything..."
+              placeholder="Ask Twaala anything..."
               placeholderTextColor={Colors.outline}
               value={message}
               onChangeText={setMessage}

@@ -48,25 +48,23 @@ async function sendViaApi(to: string, message: string): Promise<SmsResult> {
 function buildSmsContent(params: {
   recipientName: string;
   amountUgx: number;
-  amountUsdc: number;
   senderName: string;
 }): string {
-  const ref = `TWALA-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const ref = `TW-${Date.now().toString(36).toUpperCase().slice(-6)}`;
   const date = new Date().toLocaleDateString('en-UG', {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
   return [
-    `TWALA`,
+    `TWAALA`,
     ``,
     `Hi ${params.recipientName},`,
     ``,
-    `You've received UGX ${params.amountUgx.toLocaleString()} from ${params.senderName}.`,
-    `Converted from $${params.amountUsdc.toFixed(2)} USDC at 1 USDC = UGX ${(params.amountUgx / params.amountUsdc).toFixed(0)}.`,
+    `UGX ${params.amountUgx.toLocaleString()} has been sent to you by ${params.senderName}.`,
     ``,
     `Reference: ${ref}`,
     `Date: ${date}`,
     ``,
-    `Sent via Twala — Secure cross-border payments`,
+    `Thank you for using Twaala.`,
   ].join('\n');
 }
 
@@ -78,7 +76,7 @@ export async function sendTransferNotification(params: {
   senderName: string;
 }): Promise<SmsResult> {
   if (isDemoMode()) {
-    const message = buildSmsContent(params);
+    const message = buildSmsContent({ recipientName: params.recipientName, amountUgx: params.amountUgx, senderName: params.senderName });
     console.log(`  📱 SMS (demo) → ${params.phoneNumber}:\n${'-'.repeat(40)}\n${message}\n${'-'.repeat(40)}`);
     return { success: true, message: 'SMS logged (demo mode)', recipient: params.phoneNumber };
   }
@@ -88,7 +86,7 @@ export async function sendTransferNotification(params: {
   }
 
   const formattedPhone = params.phoneNumber.startsWith('+') ? params.phoneNumber : `+${params.phoneNumber}`;
-  return sendViaApi(formattedPhone, buildSmsContent(params));
+  return sendViaApi(formattedPhone, buildSmsContent({ recipientName: params.recipientName, amountUgx: params.amountUgx, senderName: params.senderName }));
 }
 
 export async function sendTransferNotificationAsync(params: {

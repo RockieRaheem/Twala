@@ -52,7 +52,7 @@ function getTxColor(status: string): string {
   return Colors.secondary;
 }
 
-export default function GoalDetail({ goalId, onBack }: { goalId?: string | null; onBack?: () => void }) {
+export default function GoalDetail({ goalId, onBack, onNavigate }: { goalId?: string | null; onBack?: () => void; onNavigate?: (screen: 'Dashboard' | 'Goals' | 'Assistant' | 'Transfer' | 'History') => void }) {
   const [activeTab, setActiveTab] = useState('Overview');
   const [goal, setGoal] = useState<GoalData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -95,7 +95,7 @@ export default function GoalDetail({ goalId, onBack }: { goalId?: string | null;
   const handleSendToGoal = () => {
     if (goalId) {
       setPendingGoalId(goalId);
-      onBack?.();
+      onNavigate?.('Transfer');
     }
   };
 

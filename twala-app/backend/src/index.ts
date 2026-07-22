@@ -80,7 +80,7 @@ app.post('/api/sms/test', express.json(), async (req, res) => {
     recipientName: 'Test Recipient',
     amountUgx: 50000,
     amountUsdc: 10,
-    senderName: 'Twala Test',
+    senderName: 'Twaala Test',
   });
 });
 
@@ -139,7 +139,7 @@ setInterval(async () => {
 // ---------------------------------------------------------------------------
 
 app.listen(config.port, '0.0.0.0', async () => {
-  console.log(`\n  🏦 Twala Backend running`);
+  console.log(`\n  🏦 Twaala Backend running`);
   console.log(`  ─────────────────────`);
   console.log(`  Network : ${config.stellar.network}`);
   console.log(`  Horizon : ${config.stellar.horizonUrl}`);

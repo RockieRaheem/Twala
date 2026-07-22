@@ -506,7 +506,7 @@ export async function clearChatMessages(sessionId?: string): Promise<void> {
   if (!sessionId) {
     const { error: seedErr } = await db().from('chat_messages').insert({
       role: 'assistant',
-      content: "Hi! I'm **Kanzu**, your AI financial companion. I can help you send money to Uganda, track your savings goals, and more. What would you like to do today?",
+      content: "Hi! I'm **Twaala**, your AI financial companion. I can help you send money to Uganda, track your savings goals, and more. What would you like to do today?",
     });
     checkError(seedErr, 'clearChatMessages (seed)');
   }

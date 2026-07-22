@@ -19,7 +19,7 @@ interface PurposeOption {
 const PURPOSES: PurposeOption[] = [
   { label: 'Family Support', value: 'family', icon: 'face-woman-profile' as const, desc: 'Send to parents or spouse' },
   { label: 'Construction Milestone', value: 'construction', icon: 'hard-hat' as const, desc: 'Release payment to contractor' },
-  { label: 'Savings', value: 'savings', icon: 'piggy-bank' as const, desc: 'Deposit to your Twala Vault' },
+  { label: 'Savings', value: 'savings', icon: 'piggy-bank' as const, desc: 'Deposit to your Twaala Vault' },
   { label: 'School Fees', value: 'education', icon: 'school' as const, desc: 'Pay tuition directly' },
   { label: 'Business Investment', value: 'business', icon: 'briefcase' as const, desc: 'Invoice or partnership payment' },
 ];
@@ -29,13 +29,13 @@ const NETWORKS = ['MTN', 'AIRTEL'];
 const PATH_NODES_SEND = [
   { label: 'Your Wallet', icon: 'wallet' as const, color: 'rgba(255,255,255,0.2)' },
   { label: 'Stellar', icon: 'circle-multiple' as const, color: Colors.secondaryContainer },
-  { label: 'Kotani Pay', icon: 'lan' as const, color: 'rgba(255,255,255,0.2)' },
+  { label: 'Processor', icon: 'lan' as const, color: 'rgba(255,255,255,0.2)' },
   { label: 'M-Money', icon: 'cellphone' as const, color: Colors.surfaceContainerLowest },
 ];
 
 const PATH_NODES_DEPOSIT = [
   { label: 'M-Money', icon: 'cellphone' as const, color: 'rgba(255,255,255,0.2)' },
-  { label: 'Kotani Pay', icon: 'lan' as const, color: 'rgba(255,255,255,0.2)' },
+  { label: 'Processor', icon: 'lan' as const, color: 'rgba(255,255,255,0.2)' },
   { label: 'Stellar', icon: 'circle-multiple' as const, color: Colors.secondaryContainer },
   { label: 'Your Wallet', icon: 'wallet' as const, color: Colors.surfaceContainerLowest },
 ];
@@ -85,8 +85,8 @@ function StellarPath({ mode }: { mode: TransferMode }) {
       </View>
       <Text style={stellarStyles.footer}>
         {mode === 'send'
-          ? 'Your USDC → Stellar (3-5s) → Kotani Pay → MTN/Airtel Mobile Money (1-2 min)'
-          : 'MTN/Airtel Mobile Money → Kotani Pay → Stellar (3-5s) → Your USDC Wallet'}
+          ? 'Your Wallet → Secured → Mobile Money (1-2 min)'
+          : 'Mobile Money → Secured → Your Wallet'}
       </Text>
     </View>
   );
@@ -519,7 +519,7 @@ export default function SmartTransfer({ user }: Props = {}) {
                     color={Colors.onPrimary}
                   />
                   <Text style={styles.submitText}>
-                    {mode === 'send' ? 'Send via Kotani Pay' : 'Request via Kotani Pay'}
+                    {mode === 'send' ? 'Send Money' : 'Request Deposit'}
                   </Text>
                 </>
               )}
