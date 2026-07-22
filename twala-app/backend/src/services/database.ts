@@ -344,13 +344,103 @@ function txRow(data: any): Transaction {
 }
 
 // ---------------------------------------------------------------------------
-// Chat
+// Chat Sessions
 // ---------------------------------------------------------------------------
 
-export async function getChatMessages(): Promise<ChatMessage[]> {
+export async function getChatSessions(): Promise<ChatSession[]> {
   const { data, error } = await db()
-    .from('chat_messages')
+    .from('chat_sessions')
     .select('*')
+    .order('last_message_at', { ascending: false });
+
+  checkError(error, 'getChatSessions');
+  return (data || []).map((r: any) => ({
+    id: r.id,
+    title: r.title,
+    createdAt: r.created_at,
+    lastMessageAt: r.last_message_at || r.created_at,
+  }));
+}
+
+export async function getChatSession(id: string): Promise<ChatSession | null> {
+  const { data, error } = await db()
+    .from('chat_sessions')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error && error.code === 'PGRST116') return null;
+  checkError(error, 'getChatSession');
+  if (!data) return null;
+  return {
+    id: data.id,
+    title: data.title,
+    createdAt: data.created_at,
+    lastMessageAt: data.last_message_at || data.created_at,
+  };
+}
+
+export async function createChatSession(title: string): Promise<ChatSession> {
+  const { data, error } = await db()
+    .from('chat_sessions')
+    .insert({ title, last_message_at: new Date().toISOString() })
+    .select()
+    .single();
+
+  checkError(error, 'createChatSession');
+  if (!data) throw new Error('Failed to create session');
+  return {
+    id: data.id,
+    title: data.title,
+    createdAt: data.created_at,
+    lastMessageAt: data.last_message_at,
+  };
+}
+
+export async function deleteChatSession(id: string): Promise<void> {
+  const { error: msgErr } = await db()
+    .from('chat_messages')
+    .delete()
+    .eq('session_id', id);
+  checkError(msgErr, 'deleteChatSession (messages)');
+
+  const { error } = await db()
+    .from('chat_sessions')
+    .delete()
+    .eq('id', id);
+  checkError(error, 'deleteChatSession');
+}
+
+export async function updateChatSessionTitle(id: string, title: string): Promise<void> {
+  const { error } = await db()
+    .from('chat_sessions')
+    .update({ title, last_message_at: new Date().toISOString() })
+    .eq('id', id);
+  checkError(error, 'updateChatSessionTitle');
+}
+
+export async function touchChatSession(id: string): Promise<void> {
+  const { error } = await db()
+    .from('chat_sessions')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', id);
+  checkError(error, 'touchChatSession');
+}
+
+// ---------------------------------------------------------------------------
+// Chat Messages
+// ---------------------------------------------------------------------------
+
+export async function getChatMessages(sessionId?: string): Promise<ChatMessage[]> {
+  let query = db()
+    .from('chat_messages')
+    .select('*');
+
+  if (sessionId) {
+    query = query.eq('session_id', sessionId);
+  }
+
+  const { data, error } = await query
     .order('created_at', { ascending: true });
 
   checkError(error, 'getChatMessages');
@@ -359,29 +449,38 @@ export async function getChatMessages(): Promise<ChatMessage[]> {
     role: r.role as 'user' | 'assistant' | 'system',
     content: r.content,
     timestamp: r.created_at,
+    sessionId: r.session_id || undefined,
   }));
 }
 
 export async function addChatMessage(msg: {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  sessionId?: string;
 }): Promise<void> {
-  const { error } = await db().from('chat_messages').insert({
-    role: msg.role,
-    content: msg.content,
-  });
+  const insert: any = { role: msg.role, content: msg.content };
+  if (msg.sessionId) insert.session_id = msg.sessionId;
+  const { error } = await db().from('chat_messages').insert(insert);
   checkError(error, 'addChatMessage');
 }
 
-export async function clearChatMessages(): Promise<void> {
-  const { error } = await db().from('chat_messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+export async function clearChatMessages(sessionId?: string): Promise<void> {
+  let query = db().from('chat_messages').delete();
+  if (sessionId) {
+    query = query.eq('session_id', sessionId);
+  } else {
+    query = query.neq('id', '00000000-0000-0000-0000-000000000000');
+  }
+  const { error } = await query;
   checkError(error, 'clearChatMessages');
 
-  const { error: seedErr } = await db().from('chat_messages').insert({
-    role: 'assistant',
-    content: "Hi! I'm **Kanzu**, your AI financial companion. I can help you send money to Uganda, track your savings goals, and more. What would you like to do today?",
-  });
-  checkError(seedErr, 'clearChatMessages (seed)');
+  if (!sessionId) {
+    const { error: seedErr } = await db().from('chat_messages').insert({
+      role: 'assistant',
+      content: "Hi! I'm **Kanzu**, your AI financial companion. I can help you send money to Uganda, track your savings goals, and more. What would you like to do today?",
+    });
+    checkError(seedErr, 'clearChatMessages (seed)');
+  }
 }
 
 // ---------------------------------------------------------------------------

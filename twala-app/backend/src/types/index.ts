@@ -52,6 +52,14 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
+  sessionId?: string;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  lastMessageAt: string;
 }
 
 export interface ExchangeRate {
