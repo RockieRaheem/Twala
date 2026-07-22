@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, FlatList, StyleSheet, Animated, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, Keyboard, Modal, Dimensions, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Animated, KeyboardAvoidingView, Platform, ActivityIndicator, Keyboard, Modal, Dimensions, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
@@ -6,6 +6,7 @@ import { chatApi, isBackendOnline, notifyChange, type ChatMsg, type ChatSessionD
 import DismissKeyboard from '../components/DismissKeyboard';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const SIDEBAR_WIDTH = SCREEN_WIDTH * 0.78;
 
 // ---------------------------------------------------------------------------
 // Typing indicator
@@ -46,7 +47,7 @@ const typingStyles = StyleSheet.create({
 });
 
 // ---------------------------------------------------------------------------
-// Professional markdown renderer (unchanged)
+// Markdown renderer
 // ---------------------------------------------------------------------------
 
 interface InlineSegment { t: 'text' | 'bold' | 'code'; v: string; }
@@ -167,7 +168,7 @@ const richStyles = StyleSheet.create({
 });
 
 // ---------------------------------------------------------------------------
-// Time grouping
+// Helpers
 // ---------------------------------------------------------------------------
 
 function groupSessionsByTime(sessions: ChatSessionData[]): { title: string; data: ChatSessionData[] }[] {
@@ -177,7 +178,6 @@ function groupSessionsByTime(sessions: ChatSessionData[]): { title: string; data
   const weekStart = new Date(todayStart.getTime() - 6 * 86400000);
 
   const groups: Record<string, ChatSessionData[]> = { Today: [], Yesterday: [], 'Last 7 Days': [], Older: [] };
-
   for (const s of sessions) {
     const d = new Date(s.lastMessageAt);
     if (d >= todayStart) groups.Today.push(s);
@@ -185,10 +185,7 @@ function groupSessionsByTime(sessions: ChatSessionData[]): { title: string; data
     else if (d >= weekStart) groups['Last 7 Days'].push(s);
     else groups.Older.push(s);
   }
-
-  return Object.entries(groups)
-    .filter(([, v]) => v.length > 0)
-    .map(([title, data]) => ({ title, data }));
+  return Object.entries(groups).filter(([, v]) => v.length > 0).map(([title, data]) => ({ title, data }));
 }
 
 function formatRelativeTime(iso: string): string {
@@ -224,26 +221,38 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
   const [isTyping, setIsTyping] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [localMode, setLocalMode] = useState(false);
 
-  const scrollRef = useRef<ScrollView>(null);
+  const listRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
 
+  const scrollToEnd = useCallback(() => {
+    if (listRef.current && messages.length > 0) {
+      setTimeout(() => {
+        listRef.current?.scrollToEnd({ animated: false });
+      }, 50);
+    }
+  }, [messages.length]);
+
+  useEffect(() => { scrollToEnd(); }, [messages, isTyping, scrollToEnd]);
+
   const loadSessions = useCallback(async () => {
-    setLocalMode(!isBackendOnline());
     const [sessionsRes, sugRes] = await Promise.all([chatApi.listSessions(), chatApi.suggestions()]);
     if (sessionsRes.success && sessionsRes.data) {
       setSessions(sessionsRes.data);
       if (sessionsRes.data.length > 0 && !activeSessionId) {
         loadSessionIntoState(sessionsRes.data[0].id);
+      } else if (sessionsRes.data.length === 0 && !activeSessionId) {
+        const createRes = await chatApi.createSession();
+        if (createRes.success && createRes.data) {
+          setSessions([createRes.data]);
+          setActiveSessionId(createRes.data.id);
+        }
       }
     }
     if (sugRes.success && sugRes.data) setSuggestions(sugRes.data);
     setLoading(false);
-    setRefreshing(false);
   }, []);
 
   useEffect(() => { loadSessions(); }, []);
@@ -251,9 +260,7 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
   const loadSessionIntoState = async (id: string) => {
     setActiveSessionId(id);
     const res = await chatApi.getSession(id);
-    if (res.success && res.data) {
-      setMessages(res.data.messages);
-    }
+    if (res.success && res.data) setMessages(res.data.messages);
   };
 
   const switchSession = (id: string) => {
@@ -268,23 +275,28 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
       setActiveSessionId(res.data.id);
       setMessages([]);
       setSidebarVisible(false);
+      setTimeout(() => inputRef.current?.focus(), 300);
     }
   };
 
   const deleteSession = (id: string, title: string) => {
-    Alert.alert('Delete Chat', `Permanently delete "${title}"?`, [
+    Alert.alert('Delete Chat?', `"${title}" will be permanently deleted.`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive', onPress: async () => {
           await chatApi.deleteSession(id);
-          setSessions((prev) => prev.filter((s) => s.id !== id));
+          const remaining = sessions.filter((s) => s.id !== id);
+          setSessions(remaining);
           if (activeSessionId === id) {
-            const remaining = sessions.filter((s) => s.id !== id);
             if (remaining.length > 0) {
               loadSessionIntoState(remaining[0].id);
             } else {
-              setActiveSessionId(null);
-              setMessages([]);
+              const createRes = await chatApi.createSession();
+              if (createRes.success && createRes.data) {
+                setSessions([createRes.data]);
+                setActiveSessionId(createRes.data.id);
+                setMessages([]);
+              }
             }
           }
         },
@@ -294,30 +306,27 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
 
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
-    if (!activeSessionId) {
-      const res = await chatApi.createSession();
-      if (!res.success || !res.data) return;
-      setSessions((prev) => [res.data, ...prev]);
-      setActiveSessionId(res.data.id);
+    let sid = activeSessionId;
+    if (!sid) {
+      const createRes = await chatApi.createSession();
+      if (!createRes.success || !createRes.data) return;
+      sid = createRes.data.id;
+      setSessions((prev) => [createRes.data, ...prev]);
+      setActiveSessionId(sid);
     }
-    const sid = activeSessionId || (await chatApi.createSession()).data?.id;
-    if (!sid) return;
 
     const userMsg = text.trim();
     setMessage('');
     setIsTyping(true);
     setError(null);
 
-    const optimisticMsg: ChatMsg = { role: 'user', content: userMsg, timestamp: new Date().toISOString() };
-    setMessages((prev) => [...prev, optimisticMsg]);
+    const optimistic: ChatMsg = { role: 'user', content: userMsg, timestamp: new Date().toISOString() };
+    setMessages((prev) => [...prev, optimistic]);
 
     const [chatRes, sugRes] = await Promise.all([chatApi.send(sid, userMsg), chatApi.suggestions()]);
     if (chatRes.success && chatRes.data) {
       const { messages: msgs, navigate } = chatRes.data as any;
-      if (Array.isArray(msgs) && msgs.length > 0) {
-        setMessages(msgs);
-        notifyChange();
-      }
+      if (Array.isArray(msgs) && msgs.length > 0) { setMessages(msgs); notifyChange(); }
       if (navigate) {
         const nav = navigate as NavigateAction;
         if (nav.screen === 'GoalDetail' && nav.goalId && onNavigateGoal) onNavigateGoal(nav.goalId);
@@ -326,40 +335,132 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
       const sessionsRes = await chatApi.listSessions();
       if (sessionsRes.success && sessionsRes.data) setSessions(sessionsRes.data);
     } else {
-      setError(chatRes.message || 'Failed to send message. Please try again.');
+      setError(chatRes.message || 'Failed to send');
     }
     if (sugRes.success && sugRes.data) setSuggestions(sugRes.data);
     setIsTyping(false);
     inputRef.current?.blur();
   };
 
-  const scrollToBottom = useCallback(() => {
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollToEnd({ animated: false });
-    });
-  }, []);
-
-  useEffect(() => { scrollToBottom(); }, [messages, isTyping, scrollToBottom]);
-
   const groupedSessions = groupSessionsByTime(sessions);
   const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const showQuickActions = messages.length <= 1 && !isTyping;
+  const showQuickActions = messages.length <= 1 && !isTyping && !loading;
 
-  // --- Render ---
+  // --- Render helpers ---
+
+  const renderChatItem = ({ item }: { item: ChatMsg }) => {
+    if (item.role === 'user') {
+      return (
+        <View style={msgStyles.userMessage}>
+          <Text style={msgStyles.userMessageText}>{item.content}</Text>
+          <Text style={msgStyles.userMsgTime}>
+            {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        </View>
+      );
+    }
+    return (
+      <View style={msgStyles.aiRow}>
+        <View style={msgStyles.aiAvatarSmall}>
+          <MaterialCommunityIcons name="robot" size={18} color={Colors.onSecondaryContainer} />
+        </View>
+        <View style={msgStyles.aiBlock}>
+          <View style={msgStyles.aiMessage}>
+            {renderRichText(item.content)}
+            <Text style={msgStyles.aiMsgTime}>
+              {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  const renderSidebarItem = (s: ChatSessionData) => {
+    const isActive = activeSessionId === s.id;
+    return (
+      <TouchableOpacity
+        key={s.id}
+        style={[sidebarStyles.item, isActive && sidebarStyles.itemActive]}
+        onPress={() => switchSession(s.id)}
+        onLongPress={() => deleteSession(s.id, s.title)}
+        activeOpacity={0.7}
+      >
+        <MaterialCommunityIcons
+          name="message-text-outline"
+          size={18}
+          color={isActive ? Colors.primary : Colors.onSurfaceVariant}
+        />
+        <View style={sidebarStyles.itemContent}>
+          <Text style={[sidebarStyles.itemTitle, isActive && { color: Colors.primary }]} numberOfLines={1}>
+            {s.title}
+          </Text>
+          <Text style={sidebarStyles.itemTime}>{formatRelativeTime(s.lastMessageAt)}</Text>
+        </View>
+        <TouchableOpacity style={sidebarStyles.itemDelete} onPress={() => deleteSession(s.id, s.title)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <MaterialCommunityIcons name="delete-outline" size={18} color={Colors.error} />
+        </TouchableOpacity>
+      </TouchableOpacity>
+    );
+  };
+
+  // --- Main render ---
 
   return (
     <View style={styles.container}>
+      {/* Sidebar */}
+      <Modal visible={sidebarVisible} animationType="none" transparent onRequestClose={() => setSidebarVisible(false)}>
+        <View style={sidebarStyles.overlay}>
+          <TouchableOpacity style={sidebarStyles.backdrop} activeOpacity={1} onPress={() => setSidebarVisible(false)} />
+          <View style={sidebarStyles.panel}>
+            <View style={sidebarStyles.headerRow}>
+              <Text style={sidebarStyles.headerTitle}>Chats</Text>
+              <TouchableOpacity onPress={() => setSidebarVisible(false)} style={sidebarStyles.closeBtn}>
+                <MaterialCommunityIcons name="close" size={22} color={Colors.onSurfaceVariant} />
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity style={sidebarStyles.newChatBtn} onPress={createNewSession} activeOpacity={0.7}>
+              <MaterialCommunityIcons name="plus" size={20} color={Colors.onPrimary} />
+              <Text style={sidebarStyles.newChatLabel}>New chat</Text>
+            </TouchableOpacity>
+
+            <FlatList
+              data={groupedSessions}
+              keyExtractor={(g) => g.title}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={sidebarStyles.listContent}
+              renderItem={({ item: group }) => (
+                <View style={sidebarStyles.group}>
+                  <Text style={sidebarStyles.groupTitle}>{group.title}</Text>
+                  {group.data.map(renderSidebarItem)}
+                </View>
+              )}
+              ListEmptyComponent={
+                loading ? null : (
+                  <View style={sidebarStyles.empty}>
+                    <MaterialCommunityIcons name="message-outline" size={36} color={Colors.outlineVariant} />
+                    <Text style={sidebarStyles.emptyText}>No chats yet</Text>
+                  </View>
+                )
+              }
+            />
+          </View>
+        </View>
+      </Modal>
+
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <TouchableOpacity style={styles.menuButton} onPress={() => setSidebarVisible(true)}>
             <MaterialCommunityIcons name="menu" size={24} color={Colors.primary} />
           </TouchableOpacity>
-          <View>
+          <View style={styles.headerInfo}>
             <Text style={styles.headerTitle}>Kanzu</Text>
-            <Text style={styles.headerSub}>
-              {isTyping ? 'Thinking...' : activeSession ? activeSession.title : isBackendOnline() ? 'AI Financial Companion' : 'Disconnected'}
-            </Text>
+            {activeSession && (
+              <Text style={styles.headerSessionTitle} numberOfLines={1}>{activeSession.title}</Text>
+            )}
           </View>
         </View>
         <TouchableOpacity style={styles.newChatButton} onPress={createNewSession} activeOpacity={0.7}>
@@ -367,178 +468,96 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
         </TouchableOpacity>
       </View>
 
-      {/* Sidebar Modal */}
-      <Modal visible={sidebarVisible} animationType="slide" transparent onRequestClose={() => setSidebarVisible(false)}>
-        <View style={styles.sidebarOverlay}>
-          <TouchableOpacity style={styles.sidebarBackdrop} activeOpacity={1} onPress={() => setSidebarVisible(false)} />
-          <View style={styles.sidebar}>
-            <View style={styles.sidebarHeader}>
-              <Text style={styles.sidebarTitle}>Chats</Text>
-              <TouchableOpacity onPress={() => setSidebarVisible(false)}>
-                <MaterialCommunityIcons name="close" size={24} color={Colors.onSurfaceVariant} />
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity style={styles.sidebarNewChat} onPress={createNewSession} activeOpacity={0.7}>
-              <MaterialCommunityIcons name="plus-circle-outline" size={22} color={Colors.primary} />
-              <Text style={styles.sidebarNewChatText}>New Chat</Text>
-            </TouchableOpacity>
-
-            <ScrollView style={styles.sidebarList} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {loading ? (
-                <ActivityIndicator color={Colors.primary} style={{ marginTop: 20 }} />
-              ) : sessions.length === 0 ? (
-                <View style={styles.sidebarEmpty}>
-                  <MaterialCommunityIcons name="message-outline" size={40} color={Colors.outlineVariant} />
-                  <Text style={styles.sidebarEmptyText}>No chats yet</Text>
-                </View>
-              ) : (
-                groupedSessions.map((group) => (
-                  <View key={group.title}>
-                    <Text style={styles.sidebarGroupTitle}>{group.title}</Text>
-                    {group.data.map((s) => (
-                      <TouchableOpacity
-                        key={s.id}
-                        style={[styles.sidebarItem, activeSessionId === s.id && styles.sidebarItemActive]}
-                        onPress={() => switchSession(s.id)}
-                        onLongPress={() => deleteSession(s.id, s.title)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={styles.sidebarItemLeft}>
-                          <MaterialCommunityIcons
-                            name="message-text-outline"
-                            size={18}
-                            color={activeSessionId === s.id ? Colors.primary : Colors.onSurfaceVariant}
-                          />
-                        </View>
-                        <View style={styles.sidebarItemContent}>
-                          <Text style={[styles.sidebarItemTitle, activeSessionId === s.id && { color: Colors.primary }]} numberOfLines={1}>
-                            {s.title}
-                          </Text>
-                          <Text style={styles.sidebarItemTime}>{formatRelativeTime(s.lastMessageAt)}</Text>
-                        </View>
-                        <TouchableOpacity style={styles.sidebarItemDelete} onPress={() => deleteSession(s.id, s.title)}>
-                          <MaterialCommunityIcons name="delete-outline" size={18} color={Colors.error} />
-                        </TouchableOpacity>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                ))
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Chat Area */}
+      {/* Chat */}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-        <DismissKeyboard>
-        <ScrollView
-          ref={scrollRef}
-          style={styles.chatArea}
-          contentContainerStyle={styles.chatContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadSessions(); }} tintColor={Colors.primary} />}
-        >
+        <View style={{ flex: 1 }}>
           {loading ? (
             <ActivityIndicator color={Colors.primary} style={{ marginTop: 40 }} />
           ) : (
-            <>
-              {error && (
-                <View style={styles.errorBanner}>
-                  <MaterialCommunityIcons name="alert-circle" size={16} color={Colors.onError} />
-                  <Text style={styles.errorText}>{error}</Text>
-                  <TouchableOpacity onPress={() => setError(null)}>
-                    <MaterialCommunityIcons name="close" size={16} color={Colors.onError} />
-                  </TouchableOpacity>
-                </View>
-              )}
+            <FlatList
+              ref={listRef}
+              data={messages}
+              keyExtractor={(item, i) => item.id || String(i)}
+              renderItem={renderChatItem}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              ListHeaderComponent={
+                <>
+                  {error && (
+                    <View style={styles.errorBanner}>
+                      <MaterialCommunityIcons name="alert-circle" size={16} color={Colors.onError} />
+                      <Text style={styles.errorText}>{error}</Text>
+                      <TouchableOpacity onPress={() => setError(null)}>
+                        <MaterialCommunityIcons name="close" size={16} color={Colors.onError} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
 
-              {showQuickActions && (
-                <View style={styles.emptyState}>
-                  <View style={styles.emptyIconWrap}>
-                    <MaterialCommunityIcons name="robot" size={48} color={Colors.onPrimary} />
-                  </View>
-                  <Text style={styles.emptyTitle}>How can I help you?</Text>
-                  <Text style={styles.emptyDesc}>Send money to Uganda, track savings, check balances</Text>
-                  <View style={styles.quickActionRow}>
-                    <TouchableOpacity style={styles.quickActionChip} activeOpacity={0.7} onPress={() => sendMessage('Send money to Uganda')}>
-                      <MaterialCommunityIcons name="send" size={18} color={Colors.primary} />
-                      <Text style={styles.quickActionLabel}>Send Money</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.quickActionChip} activeOpacity={0.7} onPress={() => sendMessage('Check my goal progress')}>
-                      <MaterialCommunityIcons name="piggy-bank" size={18} color={Colors.primary} />
-                      <Text style={styles.quickActionLabel}>Savings</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.quickActionChip} activeOpacity={0.7} onPress={() => sendMessage('How much do I have?')}>
-                      <MaterialCommunityIcons name="wallet" size={18} color={Colors.primary} />
-                      <Text style={styles.quickActionLabel}>Balance</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
+                  {showQuickActions && (
+                    <View style={styles.emptyState}>
+                      <View style={styles.emptyIconWrap}>
+                        <MaterialCommunityIcons name="robot" size={44} color={Colors.onPrimary} />
+                      </View>
+                      <Text style={styles.emptyTitle}>How can I help you?</Text>
+                      <Text style={styles.emptyDesc}>Send money, track savings, check balances</Text>
+                      <View style={styles.quickActionRow}>
+                        <TouchableOpacity style={styles.quickActionChip} activeOpacity={0.7} onPress={() => sendMessage('Send money to Uganda')}>
+                          <MaterialCommunityIcons name="send" size={16} color={Colors.primary} />
+                          <Text style={styles.quickActionLabel}>Send Money</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.quickActionChip} activeOpacity={0.7} onPress={() => sendMessage('Check my goal progress')}>
+                          <MaterialCommunityIcons name="piggy-bank" size={16} color={Colors.primary} />
+                          <Text style={styles.quickActionLabel}>Savings</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.quickActionChip} activeOpacity={0.7} onPress={() => sendMessage('How much do I have?')}>
+                          <MaterialCommunityIcons name="wallet" size={16} color={Colors.primary} />
+                          <Text style={styles.quickActionLabel}>Balance</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
 
-              {messages.length > 0 && (
-                <View style={styles.dateMarker}>
-                  <MaterialCommunityIcons name="calendar-today" size={12} color={Colors.onSurfaceVariant} />
-                  <Text style={styles.dateText}>
-                    {activeSession ? new Date(activeSession.lastMessageAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Today'}
-                  </Text>
-                </View>
-              )}
-
-              {messages.map((msg, i) => (
-                msg.role === 'user' ? (
-                  <View key={msg.id || i} style={styles.userMessage}>
-                    <Text style={styles.userMessageText}>{msg.content}</Text>
-                    <Text style={styles.userMsgTime}>
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                  </View>
-                ) : (
-                  <View key={msg.id || i} style={styles.aiRow}>
-                    <View style={styles.aiAvatarSmall}>
+                  {messages.length > 0 && (
+                    <View style={styles.dateMarker}>
+                      <MaterialCommunityIcons name="calendar-today" size={12} color={Colors.onSurfaceVariant} />
+                      <Text style={styles.dateText}>
+                        {activeSession
+                          ? new Date(activeSession.lastMessageAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+                          : 'Today'}
+                      </Text>
+                    </View>
+                  )}
+                </>
+              }
+              ListFooterComponent={
+                isTyping ? (
+                  <View style={msgStyles.aiRow}>
+                    <View style={msgStyles.aiAvatarSmall}>
                       <MaterialCommunityIcons name="robot" size={18} color={Colors.onSecondaryContainer} />
                     </View>
-                    <View style={styles.aiBlock}>
-                      <View style={styles.aiMessage}>
-                        {renderRichText(msg.content)}
-                        <Text style={styles.aiMsgTime}>
-                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </Text>
-                      </View>
-                      {i === messages.length - 1 && msg.role === 'assistant' && suggestions.length > 0 && (
-                        <View style={styles.suggestedRow}>
-                          {suggestions.slice(0, 4).map((reply) => (
-                            <TouchableOpacity key={reply} style={styles.suggestedChip} activeOpacity={0.7} onPress={() => sendMessage(reply)}>
-                              <MaterialCommunityIcons name="flash-outline" size={12} color={Colors.primary} />
-                              <Text style={styles.chipText}>{reply.length > 35 ? reply.substring(0, 32) + '...' : reply}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      )}
+                    <View style={msgStyles.typingBubble}>
+                      <TypingDots />
                     </View>
                   </View>
-                )
-              ))}
-
-              {isTyping && (
-                <View style={styles.aiRow}>
-                  <View style={styles.aiAvatarSmall}>
-                    <MaterialCommunityIcons name="robot" size={18} color={Colors.onSecondaryContainer} />
+                ) : messages.length > 0 && suggestions.length > 0 ? (
+                  <View style={styles.suggestedRow}>
+                    {suggestions.slice(0, 4).map((reply) => (
+                      <TouchableOpacity key={reply} style={styles.suggestedChip} activeOpacity={0.7} onPress={() => sendMessage(reply)}>
+                        <MaterialCommunityIcons name="flash-outline" size={12} color={Colors.primary} />
+                        <Text style={styles.chipText}>{reply.length > 35 ? reply.substring(0, 32) + '...' : reply}</Text>
+                      </TouchableOpacity>
+                    ))}
                   </View>
-                  <View style={styles.typingBubble}>
-                    <TypingDots />
-                  </View>
-                </View>
-              )}
-            </>
+                ) : null
+              }
+              onContentSizeChange={scrollToEnd}
+              onLayout={scrollToEnd}
+            />
           )}
-        </ScrollView>
-        </DismissKeyboard>
+        </View>
 
-        {/* Input Area */}
+        {/* Input */}
         <View style={styles.inputArea}>
           <View style={styles.inputRow}>
             <TextInput
@@ -558,11 +577,7 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
               onPress={() => sendMessage(message)}
               disabled={!message.trim()}
             >
-              <MaterialCommunityIcons
-                name="arrow-up"
-                size={24}
-                color={message.trim() ? Colors.onPrimary : Colors.onSurfaceVariant}
-              />
+              <MaterialCommunityIcons name="arrow-up" size={24} color={message.trim() ? Colors.onPrimary : Colors.onSurfaceVariant} />
             </TouchableOpacity>
           </View>
         </View>
@@ -571,6 +586,10 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
@@ -578,69 +597,78 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.containerPaddingMobile, paddingVertical: Spacing.stackSm,
     backgroundColor: Colors.surface, ...Shadow.level1,
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm, flex: 1 },
   menuButton: { padding: 8, borderRadius: BorderRadius.full, marginLeft: -4 },
+  headerInfo: { flex: 1 },
   headerTitle: { fontSize: Typography.headlineMd.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
-  headerSub: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurfaceVariant, maxWidth: SCREEN_WIDTH * 0.55 },
+  headerSessionTitle: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', color: Colors.onSurfaceVariant, marginTop: -2 },
   newChatButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center', ...Shadow.level1 },
-
-  // Sidebar
-  sidebarOverlay: { flex: 1, flexDirection: 'row' },
-  sidebarBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  sidebar: { width: SCREEN_WIDTH * 0.8, backgroundColor: Colors.surface, paddingTop: Platform.OS === 'ios' ? 50 : 20 },
-  sidebarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: Spacing.gutter, paddingBottom: Spacing.stackSm },
-  sidebarTitle: { fontSize: Typography.headlineMd.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
-  sidebarNewChat: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: Spacing.gutter, paddingVertical: 14, paddingHorizontal: 16, backgroundColor: Colors.primaryFixed + '1A', borderRadius: BorderRadius.lg, marginBottom: Spacing.gutter },
-  sidebarNewChatText: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.primary },
-  sidebarList: { flex: 1, paddingHorizontal: Spacing.gutter },
-  sidebarEmpty: { alignItems: 'center', paddingVertical: 40 },
-  sidebarEmptyText: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.outline, marginTop: 8 },
-  sidebarGroupTitle: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurfaceVariant, textTransform: 'uppercase', letterSpacing: 0.5, paddingVertical: 8, paddingHorizontal: 4 },
-  sidebarItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 12, borderRadius: BorderRadius.lg, marginBottom: 2 },
-  sidebarItemActive: { backgroundColor: Colors.primaryFixed + '1A' },
-  sidebarItemLeft: { width: 24, alignItems: 'center' },
-  sidebarItemContent: { flex: 1 },
-  sidebarItemTitle: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurface },
-  sidebarItemTime: { fontSize: 10, fontFamily: 'Inter', color: Colors.outline, marginTop: 1 },
-  sidebarItemDelete: { padding: 6, borderRadius: BorderRadius.md, opacity: 0.7 },
-
-  // Chat
-  chatArea: { flex: 1 },
-  chatContent: { paddingHorizontal: Spacing.containerPaddingMobile, paddingBottom: 20 },
+  listContent: { paddingHorizontal: Spacing.containerPaddingMobile, paddingBottom: 12 },
   dateMarker: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.surfaceContainerHighest + '80', paddingHorizontal: 16, paddingVertical: 6, borderRadius: BorderRadius.full, marginVertical: Spacing.gutter },
   dateText: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurfaceVariant },
-
-  // Empty state
   emptyState: { alignItems: 'center', paddingVertical: 40, gap: Spacing.stackSm },
-  emptyIconWrap: { width: 80, height: 80, borderRadius: 40, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center', marginBottom: Spacing.stackMd, ...Shadow.level2 },
+  emptyIconWrap: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center', marginBottom: Spacing.stackMd, ...Shadow.level2 },
   emptyTitle: { fontSize: Typography.headlineSm.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
   emptyDesc: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.onSurfaceVariant, textAlign: 'center' },
   quickActionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: Spacing.stackMd },
   quickActionChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: Colors.surfaceContainerLowest, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.outlineVariant + '4D', ...Shadow.level1 },
   quickActionLabel: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.primary },
-
-  // Messages
-  userMessage: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: Colors.primary, padding: Spacing.stackMd, borderRadius: 20, borderTopRightRadius: 4, ...Shadow.level1, marginBottom: Spacing.gutter },
-  userMessageText: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.onPrimary },
-  userMsgTime: { fontSize: 10, color: Colors.onPrimary, opacity: 0.7, textAlign: 'right', marginTop: 4 },
-  aiRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 8 },
-  aiAvatarSmall: { width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.secondaryContainer, justifyContent: 'center', alignItems: 'center' },
-  aiBlock: { flex: 1, gap: 8 },
-  aiMessage: { backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: 20, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: Colors.outlineVariant + '1A', ...Shadow.level1 },
-  aiMsgTime: { fontSize: 10, color: Colors.onSurfaceVariant, opacity: 0.6, textAlign: 'right', marginTop: 6 },
-  suggestedRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  suggestedRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: Spacing.containerPaddingMobile, paddingBottom: 8 },
   suggestedChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: Colors.surfaceContainerLow, borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.primaryFixedDim + '4D', ...Shadow.level1 },
   chipText: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.primary },
-  typingBubble: { backgroundColor: Colors.surfaceContainerLowest, borderRadius: 20, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: Colors.outlineVariant + '1A', paddingHorizontal: 16, ...Shadow.level1 },
-
-  // Input
   inputArea: { paddingHorizontal: Spacing.containerPaddingMobile, paddingVertical: Spacing.stackSm, backgroundColor: Colors.background, borderTopWidth: 1, borderTopColor: Colors.outlineVariant + '4D' },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, backgroundColor: Colors.surfaceContainerLowest, padding: 8, borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: Colors.outlineVariant + '4D', ...Shadow.level2 },
   input: { flex: 1, fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.onSurface, paddingVertical: 8, paddingHorizontal: 4, maxHeight: 100 },
   sendButton: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.primary, borderRadius: BorderRadius.lg, ...Shadow.level1 },
   sendButtonDisabled: { backgroundColor: Colors.surfaceContainerHigh },
-
-  // Error
   errorBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.errorContainer, padding: Spacing.stackMd, borderRadius: BorderRadius.lg, marginBottom: Spacing.gutter },
   errorText: { flex: 1, fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onError },
+});
+
+const sidebarStyles = StyleSheet.create({
+  overlay: { flex: 1, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.5)' },
+  backdrop: { flex: 1 },
+  panel: {
+    width: SIDEBAR_WIDTH,
+    backgroundColor: Colors.surface,
+    paddingTop: Platform.OS === 'ios' ? 54 : 24,
+    ...Shadow.level2,
+  },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: Spacing.gutter, paddingBottom: Spacing.stackSm },
+  headerTitle: { fontSize: Typography.headlineMd.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
+  closeBtn: { padding: 4, borderRadius: BorderRadius.full },
+  newChatBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: Spacing.gutter, marginBottom: Spacing.stackMd,
+    paddingVertical: 12, paddingHorizontal: 16,
+    backgroundColor: Colors.primary, borderRadius: BorderRadius.lg,
+    ...Shadow.level1,
+  },
+  newChatLabel: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onPrimary },
+  listContent: { paddingHorizontal: Spacing.gutter, paddingBottom: 40 },
+  group: { marginBottom: 8 },
+  groupTitle: {
+    fontSize: 11, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurfaceVariant,
+    textTransform: 'uppercase', letterSpacing: 0.8, paddingVertical: 10, paddingHorizontal: 4,
+  },
+  item: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 14, paddingHorizontal: 12, borderRadius: BorderRadius.lg, marginBottom: 2 },
+  itemActive: { backgroundColor: Colors.primaryFixed + '1A' },
+  itemContent: { flex: 1 },
+  itemTitle: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', fontWeight: '500', color: Colors.onSurface },
+  itemTime: { fontSize: 10, fontFamily: 'Inter', color: Colors.outline, marginTop: 2 },
+  itemDelete: { padding: 4, opacity: 0.6 },
+  empty: { alignItems: 'center', paddingVertical: 40 },
+  emptyText: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.outline, marginTop: 8 },
+});
+
+const msgStyles = StyleSheet.create({
+  userMessage: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: Colors.primary, padding: Spacing.stackMd, borderRadius: 20, borderTopRightRadius: 4, marginBottom: Spacing.gutter, ...Shadow.level1 },
+  userMessageText: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.onPrimary },
+  userMsgTime: { fontSize: 10, color: Colors.onPrimary, opacity: 0.7, textAlign: 'right', marginTop: 4 },
+  aiRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 8, paddingRight: 48 },
+  aiAvatarSmall: { width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.secondaryContainer, justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
+  aiBlock: { flex: 1, gap: 8 },
+  aiMessage: { backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: 20, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: Colors.outlineVariant + '1A', ...Shadow.level1 },
+  aiMsgTime: { fontSize: 10, color: Colors.onSurfaceVariant, opacity: 0.6, textAlign: 'right', marginTop: 6 },
+  typingBubble: { backgroundColor: Colors.surfaceContainerLowest, borderRadius: 20, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: Colors.outlineVariant + '1A', paddingHorizontal: 16, ...Shadow.level1 },
 });

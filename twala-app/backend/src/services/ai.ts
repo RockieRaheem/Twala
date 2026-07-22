@@ -57,7 +57,7 @@ async function buildContext(): Promise<AiContext> {
 function buildSystemPrompt(ctx: AiContext): string {
   const goalsBrief = ctx.goals.length > 0
     ? ctx.goals.map((g) =>
-        `- "${g.title}" (${fiat(g.savedAmountUgx)}/${fiat(g.targetAmountUgx)}, ${percent(g.savedAmountUgx, g.targetAmountUgx)}%, id="${g.id}")`
+        `- "${g.title}" (${fiat(g.savedAmountUgx)}/${fiat(g.targetAmountUgx)}, ${percent(g.savedAmountUgx, g.targetAmountUgx)}%)`
       ).join('\n')
     : '(none)';
   const txBrief = ctx.recentTransactions.length > 0
@@ -290,7 +290,11 @@ async function executeToolCall(toolCall: any): Promise<string> {
 
       case 'navigate': {
         _pendingNavigate = { screen: args.screen, goalId: args.goalId };
-        const dest = args.screen === 'GoalDetail' ? `the "${args.goalId}" goal details` : `the ${args.screen} screen`;
+        let dest = `the ${args.screen} screen`;
+        if (args.screen === 'GoalDetail' && args.goalId) {
+          const foundGoal = await db.getGoal(args.goalId);
+          dest = foundGoal ? `"${foundGoal.title}" details` : `your goal details`;
+        }
         return `✅ Navigating to ${dest}...`;
       }
 
