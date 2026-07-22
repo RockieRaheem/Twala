@@ -241,77 +241,85 @@ export default function Goals({ onNavigateGoal }: { onNavigateGoal?: (id: string
       </TouchableOpacity>
 
       {/* Create Modal */}
-      <Modal visible={showCreate} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>New Savings Goal</Text>
-              <TouchableOpacity onPress={() => setShowCreate(false)}>
-                <MaterialCommunityIcons name="close" size={24} color={Colors.onSurfaceVariant} />
-              </TouchableOpacity>
-            </View>
+      <Modal visible={showCreate} animationType="slide" transparent onRequestClose={() => { Keyboard.dismiss(); setShowCreate(false); }}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => { Keyboard.dismiss(); setShowCreate(false); }}>
+            <TouchableOpacity activeOpacity={1} onPress={() => {}} style={styles.modalContent}>
+              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>New Savings Goal</Text>
+                  <TouchableOpacity onPress={() => { Keyboard.dismiss(); setShowCreate(false); }}>
+                    <MaterialCommunityIcons name="close" size={24} color={Colors.onSurfaceVariant} />
+                  </TouchableOpacity>
+                </View>
 
-            <Text style={styles.inputLabel}>Title</Text>
-            <TextInput style={styles.input} placeholder="e.g. Buy Land in Wakiso" placeholderTextColor={Colors.outline} value={newTitle} onChangeText={setNewTitle} />
+                <Text style={styles.inputLabel}>Title</Text>
+                <TextInput style={styles.input} placeholder="e.g. Buy Land in Wakiso" placeholderTextColor={Colors.outline} value={newTitle} onChangeText={setNewTitle} returnKeyType="next" />
 
-            <Text style={styles.inputLabel}>Target Amount (UGX)</Text>
-            <TextInput style={styles.input} placeholder="e.g. 50000000" placeholderTextColor={Colors.outline} keyboardType="numeric" value={newTarget} onChangeText={setNewTarget} />
+                <Text style={styles.inputLabel}>Target Amount (UGX)</Text>
+                <TextInput style={styles.input} placeholder="e.g. 50000000" placeholderTextColor={Colors.outline} keyboardType="numeric" value={newTarget} onChangeText={setNewTarget} returnKeyType="next" />
 
-            <Text style={styles.inputLabel}>Category</Text>
-            <View style={styles.categoryRow}>
-              {CATEGORIES.map((c) => (
-                <TouchableOpacity key={c.value} style={[styles.categoryChip, newCategory === c.value && styles.categoryChipActive]} onPress={() => setNewCategory(c.value)}>
-                  <MaterialCommunityIcons name={c.icon as any} size={16} color={newCategory === c.value ? Colors.onPrimary : Colors.onSurfaceVariant} />
-                  <Text style={[styles.categoryChipText, newCategory === c.value && { color: Colors.onPrimary }]}>{c.label}</Text>
+                <Text style={styles.inputLabel}>Category</Text>
+                <View style={styles.categoryRow}>
+                  {CATEGORIES.map((c) => (
+                    <TouchableOpacity key={c.value} style={[styles.categoryChip, newCategory === c.value && styles.categoryChipActive]} onPress={() => { Keyboard.dismiss(); setNewCategory(c.value); }}>
+                      <MaterialCommunityIcons name={c.icon as any} size={16} color={newCategory === c.value ? Colors.onPrimary : Colors.onSurfaceVariant} />
+                      <Text style={[styles.categoryChipText, newCategory === c.value && { color: Colors.onPrimary }]}>{c.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={styles.inputLabel}>Description (optional)</Text>
+                <TextInput style={[styles.input, { height: 60 }]} placeholder="What is this goal for?" placeholderTextColor={Colors.outline} multiline value={newDesc} onChangeText={setNewDesc} />
+
+                <TouchableOpacity style={styles.createBtn} onPress={handleCreate}>
+                  <Text style={styles.createBtnText}>Create Goal</Text>
                 </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={styles.inputLabel}>Description (optional)</Text>
-            <TextInput style={[styles.input, { height: 60 }]} placeholder="What is this goal for?" placeholderTextColor={Colors.outline} multiline value={newDesc} onChangeText={setNewDesc} />
-
-            <TouchableOpacity style={styles.createBtn} onPress={handleCreate}>
-              <Text style={styles.createBtnText}>Create Goal</Text>
+              </ScrollView>
             </TouchableOpacity>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Edit Modal */}
-      <Modal visible={showEdit !== null} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Edit Goal</Text>
-              <TouchableOpacity onPress={() => { setShowEdit(null); setEditGoalId(null); }}>
-                <MaterialCommunityIcons name="close" size={24} color={Colors.onSurfaceVariant} />
-              </TouchableOpacity>
-            </View>
+      <Modal visible={showEdit !== null} animationType="slide" transparent onRequestClose={() => { Keyboard.dismiss(); setShowEdit(null); setEditGoalId(null); }}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => { Keyboard.dismiss(); setShowEdit(null); setEditGoalId(null); }}>
+            <TouchableOpacity activeOpacity={1} onPress={() => {}} style={styles.modalContent}>
+              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Edit Goal</Text>
+                  <TouchableOpacity onPress={() => { Keyboard.dismiss(); setShowEdit(null); setEditGoalId(null); }}>
+                    <MaterialCommunityIcons name="close" size={24} color={Colors.onSurfaceVariant} />
+                  </TouchableOpacity>
+                </View>
 
-            <Text style={styles.inputLabel}>Title</Text>
-            <TextInput style={styles.input} placeholder="e.g. Buy Land in Wakiso" placeholderTextColor={Colors.outline} value={editTitle} onChangeText={setEditTitle} />
+                <Text style={styles.inputLabel}>Title</Text>
+                <TextInput style={styles.input} placeholder="e.g. Buy Land in Wakiso" placeholderTextColor={Colors.outline} value={editTitle} onChangeText={setEditTitle} returnKeyType="next" />
 
-            <Text style={styles.inputLabel}>Target Amount (UGX)</Text>
-            <TextInput style={styles.input} placeholder="e.g. 50000000" placeholderTextColor={Colors.outline} keyboardType="numeric" value={editTarget} onChangeText={setEditTarget} />
+                <Text style={styles.inputLabel}>Target Amount (UGX)</Text>
+                <TextInput style={styles.input} placeholder="e.g. 50000000" placeholderTextColor={Colors.outline} keyboardType="numeric" value={editTarget} onChangeText={setEditTarget} returnKeyType="next" />
 
-            <Text style={styles.inputLabel}>Category</Text>
-            <View style={styles.categoryRow}>
-              {CATEGORIES.map((c) => (
-                <TouchableOpacity key={c.value} style={[styles.categoryChip, editCategory === c.value && styles.categoryChipActive]} onPress={() => setEditCategory(c.value)}>
-                  <MaterialCommunityIcons name={c.icon as any} size={16} color={editCategory === c.value ? Colors.onPrimary : Colors.onSurfaceVariant} />
-                  <Text style={[styles.categoryChipText, editCategory === c.value && { color: Colors.onPrimary }]}>{c.label}</Text>
+                <Text style={styles.inputLabel}>Category</Text>
+                <View style={styles.categoryRow}>
+                  {CATEGORIES.map((c) => (
+                    <TouchableOpacity key={c.value} style={[styles.categoryChip, editCategory === c.value && styles.categoryChipActive]} onPress={() => { Keyboard.dismiss(); setEditCategory(c.value); }}>
+                      <MaterialCommunityIcons name={c.icon as any} size={16} color={editCategory === c.value ? Colors.onPrimary : Colors.onSurfaceVariant} />
+                      <Text style={[styles.categoryChipText, editCategory === c.value && { color: Colors.onPrimary }]}>{c.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={styles.inputLabel}>Description (optional)</Text>
+                <TextInput style={[styles.input, { height: 60 }]} placeholder="What is this goal for?" placeholderTextColor={Colors.outline} multiline value={editDesc} onChangeText={setEditDesc} />
+
+                <TouchableOpacity style={styles.createBtn} onPress={handleEdit}>
+                  <Text style={styles.createBtnText}>Save Changes</Text>
                 </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={styles.inputLabel}>Description (optional)</Text>
-            <TextInput style={[styles.input, { height: 60 }]} placeholder="What is this goal for?" placeholderTextColor={Colors.outline} multiline value={editDesc} onChangeText={setEditDesc} />
-
-            <TouchableOpacity style={styles.createBtn} onPress={handleEdit}>
-              <Text style={styles.createBtnText}>Save Changes</Text>
+              </ScrollView>
             </TouchableOpacity>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
