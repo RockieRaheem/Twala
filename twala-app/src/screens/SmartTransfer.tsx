@@ -130,6 +130,7 @@ export default function SmartTransfer() {
   const amountRef = useRef<TextInput>(null);
   const nameRef = useRef<TextInput>(null);
   const phoneRef = useRef<TextInput>(null);
+  const submitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const dismissKeyboard = useCallback(() => Keyboard.dismiss(), []);
 
@@ -193,6 +194,8 @@ export default function SmartTransfer() {
       if (!quote) return Alert.alert('No quote', 'Unable to get exchange rate. Try again.');
       if (!recipientName.trim()) return Alert.alert('Recipient Name', 'Enter the recipient name.');
       setSubmitting(true);
+      // Safety timeout: force-stop loading if something goes wrong
+      submitTimeoutRef.current = setTimeout(() => setSubmitting(false), 35000);
       try {
         const res = await transferApi.offramp({
           amountUsdc: usdAmount,
@@ -229,6 +232,7 @@ export default function SmartTransfer() {
         const msg = err instanceof Error ? err.message : String(err);
         Alert.alert('Transfer Failed', msg);
       } finally {
+        if (submitTimeoutRef.current) clearTimeout(submitTimeoutRef.current);
         setSubmitting(false);
       }
     } else {
@@ -498,7 +502,10 @@ export default function SmartTransfer() {
               disabled={submitting}
             >
               {submitting ? (
-                <ActivityIndicator color={Colors.onPrimary} />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <ActivityIndicator color={Colors.onPrimary} />
+                  <Text style={styles.submitText}>Processing...</Text>
+                </View>
               ) : (
                 <>
                   <MaterialCommunityIcons

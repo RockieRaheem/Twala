@@ -91,6 +91,18 @@ CREATE INDEX idx_goals_status ON goals(status);
 -- ALTER TABLE wallets ADD COLUMN IF NOT EXISTS balance_usdc NUMERIC(20,7) DEFAULT 0;
 -- ALTER TABLE wallets ADD COLUMN IF NOT EXISTS balance_xlm NUMERIC(20,7) DEFAULT 0;
 
+-- User profiles (PIN-based auth, like M-Pesa)
+CREATE TABLE profiles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL UNIQUE,
+  pin_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_profiles_phone ON profiles(phone);
+
 -- Disable RLS for all tables (single-user demo app)
 ALTER TABLE wallets DISABLE ROW LEVEL SECURITY;
 ALTER TABLE goals DISABLE ROW LEVEL SECURITY;
@@ -98,3 +110,4 @@ ALTER TABLE transactions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_messages DISABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_sessions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE exchange_rates DISABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;

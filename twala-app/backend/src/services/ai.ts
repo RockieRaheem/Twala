@@ -2,7 +2,7 @@ import * as db from './database.js';
 import * as stellar from './stellar.js';
 import { getExchangeRate, calculateQuote } from './rates.js';
 import * as kotani from './kotani.js';
-import { sendTransferNotification } from './sms.js';
+import { sendTransferNotificationAsync } from './sms.js';
 import { notifyChange } from './events.js';
 import config from '../config.js';
 import type { ChatMessage, AiContext } from '../types/index.js';
@@ -285,18 +285,15 @@ async function executeToolCall(toolCall: any): Promise<string> {
           kotaniStatus: kotaniResult.data?.status || 'pending',
         });
 
-        // Send SMS if phone provided
+        // Send SMS if phone provided (fire-and-forget)
         if (args.recipientPhone) {
-          try {
-            const smsRes = await sendTransferNotification({
-              phoneNumber: args.recipientPhone,
-              recipientName: args.recipientName,
-              amountUgx: quote.receiveAmountUgx,
-              amountUsdc: quote.sendAmountUsdc,
-              senderName: 'Twala User',
-            });
-            if (smsRes.success) console.log(`  ✅ AI SMS sent to ${args.recipientPhone}`);
-          } catch { /* SMS is best-effort */ }
+          sendTransferNotificationAsync({
+            phoneNumber: args.recipientPhone,
+            recipientName: args.recipientName,
+            amountUgx: quote.receiveAmountUgx,
+            amountUsdc: quote.sendAmountUsdc,
+            senderName: args.senderName || args.recipientName,
+          });
         }
 
         return `✅ **Sent ${usdc(quote.sendAmountUsdc)} to ${args.recipientName}!** Delivery: ~${fiat(quote.receiveAmountUgx)} UGX via ${network}. Fee: ${usdc(quote.feeUsdc)}. Balance: ${usdc(newBalance.usdc)} remaining. Ref: ${referenceId.slice(-8)}`;

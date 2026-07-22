@@ -10,10 +10,11 @@ import historyRouter from './routes/history.js';
 import chatRouter from './routes/chat.js';
 import ratesRouter from './routes/rates.js';
 import kotaniRouter from './routes/kotani.js';
+import authRouter from './routes/auth.js';
 import * as stellar from './services/stellar.js';
 import * as db from './services/database.js';
 import * as kotani from './services/kotani.js';
-import { sendTransferNotification } from './services/sms.js';
+import { sendTransferNotificationAsync } from './services/sms.js';
 import { notifyChange, getChangeVersion } from './services/events.js';
 
 function getLanIp(): string {
@@ -67,24 +68,20 @@ app.use('/api/history', historyRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/rates', ratesRouter);
 app.use('/api/kotani', kotaniRouter);
+app.use('/api/auth', authRouter);
 
-// POST /api/sms/test — quick SMS test endpoint
+// POST /api/sms/test — quick SMS test endpoint (fire-and-forget)
 app.post('/api/sms/test', express.json(), async (req, res) => {
-  try {
-    const { phone } = req.body;
-    if (!phone) return res.status(400).json({ success: false, message: 'phone required' });
-    const result = await sendTransferNotification({
-      phoneNumber: phone,
-      recipientName: 'Test Recipient',
-      amountUgx: 50000,
-      amountUsdc: 10,
-      senderName: 'Twala Test',
-    });
-    res.json({ success: result.success, data: result });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ success: false, message: msg });
-  }
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ success: false, message: 'phone required' });
+  res.json({ success: true, message: 'SMS queued' });
+  sendTransferNotificationAsync({
+    phoneNumber: phone,
+    recipientName: 'Test Recipient',
+    amountUgx: 50000,
+    amountUsdc: 10,
+    senderName: 'Twala Test',
+  });
 });
 
 // ---------------------------------------------------------------------------

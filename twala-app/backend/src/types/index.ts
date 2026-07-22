@@ -79,6 +79,18 @@ export interface TransferQuote {
   estimatedArrival: string;
 }
 
+// ---------------------------------------------------------------------------
+// User Profile
+// ---------------------------------------------------------------------------
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  phone: string;
+  pinHash: string;
+  createdAt: string;
+}
+
 export interface AiContext {
   walletBalance: number;
   goals: Goal[];

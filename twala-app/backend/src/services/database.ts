@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, PostgrestError } from '@supabase/supabase-js';
-import type { WalletInfo, Transaction, Goal, ChatMessage, ChatSession, ExchangeRate } from '../types/index.js';
+import type { WalletInfo, Transaction, Goal, ChatMessage, ChatSession, ExchangeRate, UserProfile } from '../types/index.js';
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
@@ -544,4 +544,75 @@ export async function saveRate(rate: ExchangeRate): Promise<void> {
     fetched_at: rate.lastUpdated || new Date().toISOString(),
   });
   checkError(error, 'saveRate');
+}
+
+// ---------------------------------------------------------------------------
+// User Profiles
+// ---------------------------------------------------------------------------
+
+export async function getProfileByPhone(phone: string): Promise<UserProfile | null> {
+  const { data, error } = await db()
+    .from('profiles')
+    .select('*')
+    .eq('phone', phone)
+    .limit(1)
+    .single();
+
+  if (error && error.code === 'PGRST116') return null;
+  checkError(error, 'getProfileByPhone');
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    name: data.name,
+    phone: data.phone,
+    pinHash: data.pin_hash,
+    createdAt: data.created_at,
+  };
+}
+
+export async function getProfile(id: string): Promise<UserProfile | null> {
+  const { data, error } = await db()
+    .from('profiles')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error && error.code === 'PGRST116') return null;
+  checkError(error, 'getProfile');
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    name: data.name,
+    phone: data.phone,
+    pinHash: data.pin_hash,
+    createdAt: data.created_at,
+  };
+}
+
+export async function createProfile(input: {
+  name: string;
+  phone: string;
+  pinHash: string;
+}): Promise<UserProfile> {
+  const { data, error } = await db()
+    .from('profiles')
+    .insert({
+      name: input.name,
+      phone: input.phone,
+      pin_hash: input.pinHash,
+    })
+    .select()
+    .single();
+
+  checkError(error, 'createProfile');
+  if (!data) throw new Error('Failed to create profile');
+  return {
+    id: data.id,
+    name: data.name,
+    phone: data.phone,
+    pinHash: data.pin_hash,
+    createdAt: data.created_at,
+  };
 }

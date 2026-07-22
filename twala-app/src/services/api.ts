@@ -120,6 +120,13 @@ export interface ChatSessionData {
   lastMessageAt: string;
 }
 
+export interface UserProfile {
+  id: string;
+  name: string;
+  phone: string;
+  createdAt: string;
+}
+
 export interface NavigateAction {
   screen: string;
   goalId?: string;

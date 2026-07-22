@@ -3,7 +3,7 @@ import * as stellar from '../services/stellar.js';
 import * as kotani from '../services/kotani.js';
 import { getExchangeRate, calculateQuote } from '../services/rates.js';
 import * as db from '../services/database.js';
-import { sendTransferNotification } from '../services/sms.js';
+import { sendTransferNotificationAsync } from '../services/sms.js';
 import { notifyChange } from '../services/events.js';
 import config from '../config.js';
 
@@ -47,7 +47,7 @@ router.get('/quote', async (req, res) => {
 
 router.post('/offramp', async (req, res) => {
   try {
-    const { amountUsdc, recipientName, recipientPhone, recipientNetwork, purpose, goalId } = req.body;
+    const { amountUsdc, recipientName, recipientPhone, recipientNetwork, purpose, goalId, senderName } = req.body;
 
     const errors: string[] = [];
     if (!amountUsdc || amountUsdc <= 0) errors.push('Valid amountUsdc required');
@@ -128,27 +128,16 @@ router.post('/offramp', async (req, res) => {
       await db.contributeToGoal(goalId, quote.receiveAmountUgx);
     }
 
-    // Step 7: Send SMS notification to recipient
-    let smsResult: { success: boolean; message: string } | null = null;
+    // Step 7: Send response immediately — SMS is fire-and-forget
     if (recipientPhone) {
-      try {
-        smsResult = await sendTransferNotification({
-          phoneNumber: recipientPhone,
-          recipientName: recipientName.trim(),
-          amountUgx: quote.receiveAmountUgx,
-          amountUsdc: quote.sendAmountUsdc,
-          senderName: 'Twala User',
-        });
-        if (smsResult.success) {
-          console.log(`  ✅ SMS sent to ${recipientPhone}`);
-        } else {
-          console.warn(`  ⚠️ SMS: ${smsResult.message}`);
-        }
-      } catch (smsErr) {
-        const msg = smsErr instanceof Error ? smsErr.message : String(smsErr);
-        console.warn(`  ⚠️ SMS error: ${msg}`);
-        smsResult = { success: false, message: msg };
-      }
+      const fromName = (senderName || '').trim() || recipientName.trim();
+      sendTransferNotificationAsync({
+        phoneNumber: recipientPhone,
+        recipientName: recipientName.trim(),
+        amountUgx: quote.receiveAmountUgx,
+        amountUsdc: quote.sendAmountUsdc,
+        senderName: fromName,
+      });
     }
 
     res.json({
@@ -158,7 +147,7 @@ router.post('/offramp', async (req, res) => {
         quote,
         kotaniReferenceId: referenceId,
         balance: newBalance.usdc,
-        sms: smsResult,
+        sms: null, // SMS sent async, check logs
         message: `Sent $${quote.sendAmountUsdc.toFixed(2)} USDC → ${recipientName.trim()}. Delivering ~${quote.receiveAmountUgx.toLocaleString()} UGX via ${recipientNetwork || 'MTN'} Mobile Money. Reference: ${referenceId.slice(-8)}`,
       },
     });
