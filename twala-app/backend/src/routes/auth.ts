@@ -18,6 +18,12 @@ function sanitize(profile: UserProfile): Omit<UserProfile, 'pinHash'> {
   };
 }
 
+// Strip everything except digits and leading +
+function normalizePhone(raw: string): string {
+  const digits = raw.replace(/[^\d+]/g, '');
+  return digits.startsWith('+') ? digits : `+${digits}`;
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/auth/register — create a new user profile
 // ---------------------------------------------------------------------------
@@ -35,16 +41,20 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ success: false, message: errors.join('; ') });
     }
 
-    const formattedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+    const normalized = normalizePhone(phone);
 
-    const existing = await db.getProfileByPhone(formattedPhone);
+    if (normalized.length < 10) {
+      return res.status(400).json({ success: false, message: 'Phone number is too short. Use international format (e.g. +256712345678).' });
+    }
+
+    const existing = await db.getProfileByPhone(normalized);
     if (existing) {
       return res.status(409).json({ success: false, message: 'An account with this phone number already exists' });
     }
 
     const profile = await db.createProfile({
       name: name.trim(),
-      phone: formattedPhone,
+      phone: normalized,
       pinHash: hashPin(pin),
     });
 
@@ -67,8 +77,8 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone and PIN are required' });
     }
 
-    const formattedPhone = phone.startsWith('+') ? phone : `+${phone}`;
-    const profile = await db.getProfileByPhone(formattedPhone);
+    const normalized = normalizePhone(phone);
+    const profile = await db.getProfileByPhone(normalized);
 
     if (!profile) {
       return res.status(401).json({ success: false, message: 'No account found with this phone number' });
@@ -108,8 +118,8 @@ router.get('/profile/:id', async (req, res) => {
 
 router.get('/check/:phone', async (req, res) => {
   try {
-    const formattedPhone = req.params.phone.startsWith('+') ? req.params.phone : `+${req.params.phone}`;
-    const profile = await db.getProfileByPhone(formattedPhone);
+    const normalized = normalizePhone(req.params.phone);
+    const profile = await db.getProfileByPhone(normalized);
     res.json({ success: true, data: { exists: !!profile } });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
