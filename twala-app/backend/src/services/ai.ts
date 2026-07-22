@@ -8,7 +8,14 @@ import type { ChatMessage, AiContext } from '../types/index.js';
 const KOTANI_ESCROW_ADDRESS = 'GA7Q5OQJ6X4G6T5ZVQ4Q3Z6H5KQ7R5QKZ6H5KQ7R5QKZ6H5KQ7R5QKZ6';
 
 // Models in priority order (best function-calling first, then fallbacks)
-const GROQ_MODELS = ['llama-3.3-70b-versatile', 'gemma2-9b-it', 'llama-3.1-8b-instant'];
+// Only actively supported models — confirmed via Groq docs as of July 2026
+const GROQ_MODELS = [
+  'llama-3.3-70b-versatile',       // Best function calling, 131K context
+  'qwen/qwen3.6-27b',              // Strong tool use, parallel calls, 131K context
+  'minimaxai/minimax-m2.7',        // Excellent tool use, parallel calls
+  'llama-4-maverick-17b',          // Llama 4, fast inference, tool support
+  'llama-3.1-8b-instant',          // Speed king — last resort, weak tool use
+];
 
 let _pendingNavigate: { screen: string; goalId?: string } | null = null;
 
@@ -57,7 +64,7 @@ async function buildContext(): Promise<AiContext> {
 function buildSystemPrompt(ctx: AiContext): string {
   const goalsBrief = ctx.goals.length > 0
     ? ctx.goals.map((g) =>
-        `- "${g.title}" (${fiat(g.savedAmountUgx)}/${fiat(g.targetAmountUgx)}, ${percent(g.savedAmountUgx, g.targetAmountUgx)}%)`
+        `- "${g.title}" (${fiat(g.savedAmountUgx)}/${fiat(g.targetAmountUgx)}, ${percent(g.savedAmountUgx, g.targetAmountUgx)}%) ID:${g.id}`
       ).join('\n')
     : '(none)';
   const txBrief = ctx.recentTransactions.length > 0
@@ -81,13 +88,16 @@ You can perform these actions via function calls — DO IT when asked:
 5. delete_goal(goalId)
 6. navigate(screen, goalId?) — go to Dashboard | Goals | Transfer | History | GoalDetail
 
+IMPORTANT: When calling functions that require a goalId, you MUST use the exact ID value shown after "ID:" in the Goals list above. Never make up a goalId — use the actual one from the context.
+
 ## Formatting rules
 - Use ## for section headings (never ### or #)
 - Use **bold** for amounts, names, and emphasis
 - Use - for lists (never numbers or *)
 - Use an emoji on its own line for key points: ✅ ❌ ⚠️ 🎉 🎯 💡
 - Never use > blockquotes, --- rules, or backtick code
-- Keep responses concise and warm. Never fabricate data.`;
+- Keep responses concise and warm. Never fabricate data.
+- CRITICAL: Never display raw IDs, UUIDs, or internal identifiers in your response text.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,12 +126,12 @@ const TOOLS: any[] = [
     type: 'function',
     function: {
       name: 'contribute_to_goal',
-      description: 'Add funds to an existing savings goal',
+      description: 'Add funds to an existing savings goal — use the exact UUID from the goals list as goalId',
       parameters: {
         type: 'object',
         properties: {
-          goalId: { type: 'string', description: 'The goal ID to contribute to' },
-          amountUgx: { type: 'number', description: 'Amount in UGX' },
+          goalId: { type: 'string', description: 'The exact UUID of the goal from the context (e.g. "550e8400-e29b-41d4-a716-446655440000")' },
+          amountUgx: { type: 'number', description: 'Amount in UGX to add' },
         },
         required: ['goalId', 'amountUgx'],
       },
@@ -149,11 +159,11 @@ const TOOLS: any[] = [
     type: 'function',
     function: {
       name: 'update_goal',
-      description: 'Update an existing goal',
+      description: 'Update an existing goal — use the exact UUID from the goals list as goalId',
       parameters: {
         type: 'object',
         properties: {
-          goalId: { type: 'string', description: 'The goal ID to update' },
+          goalId: { type: 'string', description: 'The exact UUID of the goal from the context' },
           title: { type: 'string', description: 'New title' },
           description: { type: 'string', description: 'New description' },
           targetAmountUgx: { type: 'number', description: 'New target amount in UGX' },
@@ -168,10 +178,10 @@ const TOOLS: any[] = [
     type: 'function',
     function: {
       name: 'delete_goal',
-      description: 'Delete a savings goal permanently',
+      description: 'Delete a savings goal permanently — use the exact UUID from the goals list as goalId',
       parameters: {
         type: 'object',
-        properties: { goalId: { type: 'string', description: 'The goal ID to delete' } },
+        properties: { goalId: { type: 'string', description: 'The exact UUID of the goal from the context' } },
         required: ['goalId'],
       },
     },
@@ -185,7 +195,7 @@ const TOOLS: any[] = [
         type: 'object',
         properties: {
           screen: { type: 'string', enum: ['Dashboard', 'Goals', 'Transfer', 'History', 'GoalDetail'], description: 'The screen to navigate to' },
-          goalId: { type: 'string', description: 'Goal ID (for GoalDetail)' },
+          goalId: { type: 'string', description: 'Goal UUID (only for GoalDetail screen)' },
         },
         required: ['screen'],
       },
@@ -307,7 +317,7 @@ async function executeToolCall(toolCall: any): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Gemini
+// Gemini 2.0 Flash — works on free tier, 15 RPM, 1M TPM
 // ---------------------------------------------------------------------------
 
 async function callGemini(userMessage: string, ctx: AiContext, history: ChatMessage[]): Promise<string | null> {
@@ -321,11 +331,11 @@ async function callGemini(userMessage: string, ctx: AiContext, history: ChatMess
     contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
     const res = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + key,
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + key,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(20000),
+        signal: AbortSignal.timeout(25000),
         body: JSON.stringify({
           system_instruction: { parts: [{ text: buildSystemPrompt(ctx) }] },
           contents,
@@ -369,13 +379,13 @@ async function tryGroqModel(
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(25000),
     body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', temperature: 0.7, max_tokens: 1024 }),
   });
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    if (response.status === 429) return null; // rate limited -> try next model
+    if (response.status === 429) return null;
     if (response.status === 400 && body.includes('tool call validation')) {
       return await groqTextFallback(model, key, messages);
     }
@@ -387,23 +397,21 @@ async function tryGroqModel(
   const choice = data?.choices?.[0]?.message;
   if (!choice) return null;
 
-  // No tool calls — return the text directly
   if (!choice.tool_calls || choice.tool_calls.length === 0) {
     return choice.content || null;
   }
 
-  // Execute tools
   for (const toolCall of choice.tool_calls) {
     const result = await executeToolCall(toolCall);
     messages.push({ role: 'assistant', content: null, tool_calls: [toolCall] });
     messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
   }
 
-  // Round 2: ask the model to synthesize a response from tool results
+  // Round 2: synthesise response from tool results
   const finalRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(25000),
     body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1024 }),
   });
 
@@ -413,7 +421,6 @@ async function tryGroqModel(
     if (finalContent) return finalContent;
   }
 
-  // Second round failed — build a clean summary from tool results instead
   const lastToolResults = messages.filter((m: any) => m.role === 'tool').map((m: any) => m.content);
   if (lastToolResults.length > 0) {
     return lastToolResults.join('\n\n');
@@ -427,7 +434,7 @@ async function groqTextFallback(model: string, key: string, messages: any[]): Pr
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(25000),
       body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1024 }),
     });
     if (!res.ok) return null;
@@ -440,7 +447,7 @@ async function groqTextFallback(model: string, key: string, messages: any[]): Pr
 // Startup log
 // ---------------------------------------------------------------------------
 
-console.log(`  AI      : ${process.env.GEMINI_API_KEY ? 'Gemini ✓ (2.5 Flash)' : 'Gemini ✗'} | ${process.env.GROQ_API_KEY ? `Groq ✓ (${GROQ_MODELS.join(', ')})` : 'Groq ✗'}`);
+console.log(`  AI      : ${process.env.GEMINI_API_KEY ? 'Gemini ✓ (2.0 Flash)' : 'Gemini ✗'} | ${process.env.GROQ_API_KEY ? `Groq ✓ (${GROQ_MODELS.join(', ')})` : 'Groq ✗'}`);
 
 // ---------------------------------------------------------------------------
 // Public API — never throws
@@ -449,15 +456,12 @@ console.log(`  AI      : ${process.env.GEMINI_API_KEY ? 'Gemini ✓ (2.5 Flash)'
 export async function chat(userMessage: string, sessionId?: string): Promise<{ messages: ChatMessage[]; navigate: { screen: string; goalId?: string } | null }> {
   _pendingNavigate = null;
 
-  // 1. Save user message (best-effort)
   try { await db.addChatMessage({ role: 'user', content: userMessage, sessionId }); } catch (e) { console.error('Failed to save user msg:', e); }
 
-  // 2. Build context + get session history
   const ctx = await buildContext();
   let history: ChatMessage[] = [];
   try { history = await db.getChatMessages(sessionId); } catch (e) { console.error('Failed to load history:', e); }
 
-  // 3. Try AI providers
   let reply: string | null = null;
 
   if (process.env.GROQ_API_KEY) {
@@ -468,16 +472,13 @@ export async function chat(userMessage: string, sessionId?: string): Promise<{ m
     try { reply = await callGemini(userMessage, ctx, history); } catch (e) { console.error('Gemini exception:', e); }
   }
 
-  // 4. Always generate a response
   if (!reply) {
     reply = "I'm here to help! You can ask me to send money to Uganda, create or manage savings goals, check your balance, or navigate to any screen in the app. What would you like to do?";
     console.warn('  AI: all providers exhausted, using fallback');
   }
 
-  // 5. Save assistant reply
   try { await db.addChatMessage({ role: 'assistant', content: reply, sessionId }); } catch (e) { console.error('Failed to save reply:', e); }
 
-  // 6. Return messages for the session
   let messages: ChatMessage[] = [];
   try { messages = await db.getChatMessages(sessionId); } catch (e) { console.error('Failed to get messages:', e); }
 
