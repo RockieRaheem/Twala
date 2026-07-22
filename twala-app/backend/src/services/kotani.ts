@@ -4,9 +4,9 @@ import config from '../config.js';
 // Configuration
 // ---------------------------------------------------------------------------
 
-const BASE_URL = config.kotani.useSandbox
-  ? config.kotani.sandboxUrl
-  : config.kotani.productionUrl;
+function apiUrl(): string {
+  return config.kotani.useSandbox ? config.kotani.sandboxUrl : config.kotani.productionUrl;
+}
 
 function headers() {
   return {
@@ -15,70 +15,106 @@ function headers() {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Types — Kotani Pay v3 API
-// ---------------------------------------------------------------------------
-
-export interface KotaniApiResponse<T> {
-  success: boolean;
-  statusCode?: number;
-  message: string;
-  data?: T;
-  error?: string;
+function isLive(): boolean {
+  return !!config.kotani.apiKey;
 }
 
-export interface KotaniOfframpRequest {
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface KotaniResponse<T> {
+  success: boolean;
+  statusCode: number;
+  message: string;
+  data?: T;
+}
+
+export interface KotaniCustomer {
+  id: string;
+  phone_number: string;
+  country_code: string;
+  network?: string;
+  first_name?: string;
+  last_name?: string;
+  account_name?: string;
+  email?: string;
+}
+
+export interface CreateCustomerParams {
+  phoneNumber: string;
+  countryCode: string;
+  network?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+}
+
+export interface OfframpRateParams {
+  from: 'USDC' | 'USDT' | 'CUSD';
+  to: 'KES' | 'UGX' | 'NGN' | 'GHS' | 'ZAR' | 'TZS' | 'XOF' | 'ZMW';
+  cryptoAmount: number;
+}
+
+export interface OfframpRateData {
+  from: string;
+  to: string;
+  value: string;
+  id: string;
+  fiatAmount: number;
+  cryptoAmount: number;
+  transactionAmount: number;
+  fee: number;
+}
+
+export interface CreateOfframpParams {
   referenceId: string;
   cryptoAmount: number;
   currency: string;
   chain: string;
   token: string;
+  callbackUrl?: string;
   transactionHash?: string;
 }
 
-export interface KotaniOfframpData {
+export interface OfframpData {
   referenceId: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'PENDING' | 'CRYPTO_RECEIVED' | 'SUCCESSFUL' | 'FAILED' | 'REFUND_PENDING' | 'REFUNDED' | 'REFUND_FAILED';
   cryptoAmount: number;
   cryptoAmountReceived: number;
-  fiatAmount: number;
   feeInCrypto: number;
-  feeInFiat: number;
-  rate: number;
-  transactionHash: string;
-  phoneNumber?: string;
-  network?: string;
-  createdAt: string;
-  completedAt?: string;
+  feeType?: string;
+  cryptoWallet: string;
+  chain: any;
+  token: any;
+  transactionHash?: string;
+  fiatAmount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  depositAddress?: string;
 }
 
-export interface KotaniOnrampRequest {
+export interface WithdrawMobileMoneyParams {
   referenceId: string;
-  fiatAmount: number;
+  amount: number;
   currency: string;
-  chain: string;
-  token: string;
   phoneNumber: string;
   network: string;
+  callbackUrl?: string;
+  customerId?: string;
 }
 
-export interface KotaniOnrampData {
+export interface WithdrawalData {
   referenceId: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  fiatAmount: number;
-  cryptoAmount: number;
-  cryptoAmountSent: number;
-  feeInFiat: number;
-  feeInCrypto: number;
-  rate: number;
+  status: string;
+  amount: number;
+  currency: string;
   phoneNumber: string;
-  network: string;
-  transactionHash: string;
+  fee: number;
   createdAt: string;
-  completedAt?: string;
 }
 
-export interface KotaniBalanceData {
+export interface BalanceData {
   asset: string;
   chain: string;
   balance: number;
@@ -86,296 +122,256 @@ export interface KotaniBalanceData {
   available: number;
 }
 
-export interface KotaniWebhookPayload {
+export interface WebhookPayload {
   event: 'offramp.completed' | 'offramp.failed' | 'onramp.completed' | 'onramp.failed';
   referenceId: string;
-  status: 'completed' | 'failed';
+  status: 'SUCCESSFUL' | 'FAILED' | 'REFUNDED';
   transactionHash?: string;
   completedAt?: string;
   failureReason?: string;
 }
 
 // ---------------------------------------------------------------------------
-// Demo mode helpers
+// Utilities
 // ---------------------------------------------------------------------------
 
-export type OfframpCompletionCallback = (referenceId: string, status: 'completed' | 'failed') => void;
-
-let _onOfframpComplete: OfframpCompletionCallback | null = null;
-
-export function onOfframpComplete(cb: OfframpCompletionCallback): void {
-  _onOfframpComplete = cb;
+export function generateReferenceId(): string {
+  return `twala-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function isDemoMode(): boolean {
-  return !config.kotani.apiKey;
-}
+// ---------------------------------------------------------------------------
+// Demo simulation
+// ---------------------------------------------------------------------------
+
+type Callback = (referenceId: string, status: string) => void;
+let _onComplete: Callback | null = null;
+export function onOfframpComplete(cb: Callback): void { _onComplete = cb; }
 
 function demoDelay(ms = 600): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise(r => setTimeout(r, ms));
 }
 
-let demoOfframps: Map<string, KotaniOfframpData> = new Map();
-let demoOnramps: Map<string, KotaniOnrampData> = new Map();
+const demoOfframps = new Map<string, OfframpData>();
 let demoIdCounter = 0;
-
-function nextDemoRefId(): string {
+function demoRefId(): string {
   return `twala-demo-${Date.now()}-${++demoIdCounter}`;
 }
 
+async function apiCall<T>(
+  method: string,
+  path: string,
+  body?: any,
+): Promise<KotaniResponse<T>> {
+  try {
+    const res = await fetch(`${apiUrl()}${path}`, {
+      method,
+      headers: headers(),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const json = await res.json();
+    return { success: res.ok, statusCode: res.status, message: json.message || '', data: json.data };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, statusCode: 0, message: `Network: ${msg}` };
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Offramp — USDC → Mobile Money
+// 1. Customers
+// ---------------------------------------------------------------------------
+
+export async function createCustomer(
+  params: CreateCustomerParams,
+): Promise<KotaniResponse<KotaniCustomer>> {
+  if (!isLive()) {
+    await demoDelay();
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'Customer created (demo)',
+      data: { id: `demo-cust-${Date.now()}`, phone_number: params.phoneNumber, country_code: params.countryCode, network: params.network, first_name: params.firstName, last_name: params.lastName },
+    };
+  }
+  return apiCall<KotaniCustomer>('POST', '/api/v3/customer/mobile-money', {
+    phone_number: params.phoneNumber,
+    country_code: params.countryCode,
+    network: params.network,
+    first_name: params.firstName,
+    last_name: params.lastName,
+    email: params.email,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 2. Rate Quotes
+// ---------------------------------------------------------------------------
+
+export async function getOfframpRate(
+  params: OfframpRateParams,
+): Promise<KotaniResponse<OfframpRateData>> {
+  if (!isLive()) {
+    await demoDelay(300);
+    const rate = params.to === 'UGX' ? 3750 : params.to === 'KES' ? 150 : 1000;
+    const fee = Math.max(params.cryptoAmount * 0.02, 1);
+    const fiatAmount = Math.round((params.cryptoAmount - fee) * rate);
+    return {
+      success: true, statusCode: 200, message: 'Rate (demo)',
+      data: {
+        from: params.from, to: params.to, value: rate.toString(), id: 'demo-rate',
+        fiatAmount, cryptoAmount: params.cryptoAmount, transactionAmount: fiatAmount, fee,
+      },
+    };
+  }
+  return apiCall<OfframpRateData>('POST', '/api/v3/rate/offramp', {
+    from: params.from,
+    to: params.to,
+    cryptoAmount: params.cryptoAmount,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 3. Offramp — Crypto → Fiat
 // ---------------------------------------------------------------------------
 
 export async function createOfframp(
-  params: KotaniOfframpRequest
-): Promise<KotaniApiResponse<KotaniOfframpData>> {
-  if (isDemoMode()) {
+  params: CreateOfframpParams,
+): Promise<KotaniResponse<OfframpData>> {
+  if (!isLive()) {
     await demoDelay();
     const rate = 3750;
     const fee = Math.max(params.cryptoAmount * 0.02, 1);
     const received = params.cryptoAmount - fee;
-    const data: KotaniOfframpData = {
+    const data: OfframpData = {
       referenceId: params.referenceId,
-      status: 'pending',
+      status: 'PENDING',
       cryptoAmount: params.cryptoAmount,
       cryptoAmountReceived: received,
-      fiatAmount: Math.round(received * rate),
       feeInCrypto: fee,
-      feeInFiat: Math.round(fee * rate),
-      rate,
-      transactionHash: params.transactionHash || `demo-tx-${Date.now()}`,
+      cryptoWallet: 'demo-wallet-address',
+      chain: params.chain,
+      token: params.token,
+      fiatAmount: Math.round(received * rate),
       createdAt: new Date().toISOString(),
+      depositAddress: 'GBDEMO...DEPOSIT...ADDRESS',
     };
     demoOfframps.set(data.referenceId, data);
 
-    // Simulate completion after 5s
     setTimeout(() => {
       const stored = demoOfframps.get(data.referenceId);
       if (stored) {
-        stored.status = 'completed';
-        stored.completedAt = new Date().toISOString();
+        stored.status = 'SUCCESSFUL';
+        stored.transactionHash = `demo-tx-${Date.now()}`;
+        stored.updatedAt = new Date().toISOString();
         demoOfframps.set(data.referenceId, stored);
-        if (_onOfframpComplete) {
-          _onOfframpComplete(data.referenceId, 'completed');
-        }
+        _onComplete?.(data.referenceId, 'SUCCESSFUL');
       }
     }, 5000);
 
-    return { success: true, statusCode: 200, message: 'Offramp created successfully', data };
+    return { success: true, statusCode: 200, message: 'Offramp created', data };
   }
 
-  try {
-    const res = await fetch(`${BASE_URL}/api/v3/offramp`, {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify({
-        referenceId: params.referenceId,
-        cryptoAmount: params.cryptoAmount,
-        currency: params.currency,
-        chain: params.chain,
-        token: params.token,
-        transactionHash: params.transactionHash,
-      }),
-    });
-    const json = await res.json();
-    return { success: res.ok, statusCode: res.status, ...json };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { success: false, statusCode: 0, message: `Network error: ${msg}`, error: msg };
-  }
+  return apiCall<OfframpData>('POST', '/api/v3/offramp', {
+    referenceId: params.referenceId,
+    cryptoAmount: params.cryptoAmount,
+    currency: params.currency,
+    chain: params.chain,
+    token: params.token,
+    ...(params.callbackUrl ? { callbackUrl: params.callbackUrl } : {}),
+    ...(params.transactionHash ? { transactionHash: params.transactionHash } : {}),
+  });
 }
 
 export async function getOfframpStatus(
-  referenceId: string
-): Promise<KotaniApiResponse<KotaniOfframpData>> {
-  if (isDemoMode()) {
+  referenceId: string,
+): Promise<KotaniResponse<OfframpData>> {
+  if (!isLive()) {
     await demoDelay(300);
     const data = demoOfframps.get(referenceId);
-    if (!data) {
-      return { success: false, statusCode: 404, message: 'Offramp not found' };
-    }
+    if (!data) return { success: false, statusCode: 404, message: 'Not found' };
     return { success: true, statusCode: 200, message: 'OK', data };
   }
-
-  try {
-    const res = await fetch(`${BASE_URL}/api/v3/offramp/status/${referenceId}`, {
-      headers: headers(),
-    });
-    const json = await res.json();
-    return { success: res.ok, statusCode: res.status, ...json };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { success: false, statusCode: 0, message: `Network error: ${msg}`, error: msg };
-  }
+  return apiCall<OfframpData>('GET', `/api/v3/offramp/${referenceId}`);
 }
 
 // ---------------------------------------------------------------------------
-// Onramp — Mobile Money → USDC
+// 4. Withdrawal — Direct mobile money disbursement (funds already in Kotani)
 // ---------------------------------------------------------------------------
 
-export async function createOnramp(
-  params: KotaniOnrampRequest
-): Promise<KotaniApiResponse<KotaniOnrampData>> {
-  if (isDemoMode()) {
+export async function withdrawMobileMoney(
+  params: WithdrawMobileMoneyParams,
+): Promise<KotaniResponse<WithdrawalData>> {
+  if (!isLive()) {
     await demoDelay();
-    const rate = 3750;
-    const fee = Math.max(params.fiatAmount * 0.02, 1000);
-    const cryptoAmount = (params.fiatAmount - fee) / rate;
-    const data: KotaniOnrampData = {
-      referenceId: params.referenceId,
-      status: 'pending',
-      fiatAmount: params.fiatAmount,
-      cryptoAmount,
-      cryptoAmountSent: cryptoAmount * 0.98,
-      feeInFiat: fee,
-      feeInCrypto: fee / rate,
-      rate,
-      phoneNumber: params.phoneNumber,
-      network: params.network,
-      transactionHash: '',
-      createdAt: new Date().toISOString(),
+    return {
+      success: true, statusCode: 200, message: 'Withdrawal created (demo)',
+      data: {
+        referenceId: params.referenceId, status: 'PENDING', amount: params.amount,
+        currency: params.currency, phoneNumber: params.phoneNumber, fee: params.amount * 0.02,
+        createdAt: new Date().toISOString(),
+      },
     };
-    demoOnramps.set(data.referenceId, data);
-
-    // Simulate incoming USDC after 30s
-    setTimeout(() => {
-      const stored = demoOnramps.get(data.referenceId);
-      if (stored) {
-        stored.status = 'completed';
-        stored.transactionHash = `demo-incoming-${Date.now()}`;
-        stored.completedAt = new Date().toISOString();
-        demoOnramps.set(data.referenceId, stored);
-      }
-    }, 30000);
-
-    return { success: true, statusCode: 200, message: 'Onramp created successfully', data };
   }
-
-  try {
-    const res = await fetch(`${BASE_URL}/api/v3/onramp`, {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify({
-        referenceId: params.referenceId,
-        fiatAmount: params.fiatAmount,
-        currency: params.currency,
-        chain: params.chain,
-        token: params.token,
-        phoneNumber: params.phoneNumber,
-        network: params.network,
-      }),
-    });
-    const json = await res.json();
-    return { success: res.ok, statusCode: res.status, ...json };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { success: false, statusCode: 0, message: `Network error: ${msg}`, error: msg };
-  }
+  return apiCall<WithdrawalData>('POST', '/api/v3/withdraw/mobile-money', {
+    referenceId: params.referenceId,
+    amount: params.amount,
+    currency: params.currency,
+    phoneNumber: params.phoneNumber,
+    network: params.network,
+    ...(params.callbackUrl ? { callbackUrl: params.callbackUrl } : {}),
+    ...(params.customerId ? { customerId: params.customerId } : {}),
+  });
 }
 
-export async function getOnrampStatus(
-  referenceId: string
-): Promise<KotaniApiResponse<KotaniOnrampData>> {
-  if (isDemoMode()) {
+export async function getWithdrawalStatus(
+  referenceId: string,
+): Promise<KotaniResponse<WithdrawalData>> {
+  if (!isLive()) {
     await demoDelay(300);
-    const data = demoOnramps.get(referenceId);
-    if (!data) {
-      return { success: false, statusCode: 404, message: 'Onramp not found' };
-    }
-    return { success: true, statusCode: 200, message: 'OK', data };
+    return { success: true, statusCode: 200, message: 'OK (demo)', data: undefined };
   }
-
-  try {
-    const res = await fetch(`${BASE_URL}/api/v3/onramp/status/${referenceId}`, {
-      headers: headers(),
-    });
-    const json = await res.json();
-    return { success: res.ok, statusCode: res.status, ...json };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { success: false, statusCode: 0, message: `Network error: ${msg}`, error: msg };
-  }
+  return apiCall<WithdrawalData>('GET', `/api/v3/withdraw/status/${referenceId}`);
 }
 
 // ---------------------------------------------------------------------------
-// Merchant balance
+// 5. Balances
 // ---------------------------------------------------------------------------
 
-export async function getMerchantBalance(): Promise<KotaniApiResponse<KotaniBalanceData[]>> {
-  if (isDemoMode()) {
+export async function getMerchantBalance(): Promise<KotaniResponse<BalanceData[]>> {
+  if (!isLive()) {
     await demoDelay(300);
     return {
-      success: true,
-      statusCode: 200,
-      message: 'OK',
+      success: true, statusCode: 200, message: 'OK',
       data: [
         { asset: 'USDC', chain: 'STELLAR', balance: 25000, locked: 3200, available: 21800 },
         { asset: 'XLM', chain: 'STELLAR', balance: 5000, locked: 0, available: 5000 },
       ],
     };
   }
-
-  try {
-    const res = await fetch(`${BASE_URL}/api/v3/balance`, { headers: headers() });
-    const json = await res.json();
-    return { success: res.ok, statusCode: res.status, ...json };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { success: false, statusCode: 0, message: `Network error: ${msg}`, error: msg };
-  }
+  return apiCall<BalanceData[]>('GET', '/api/v3/balance');
 }
 
 // ---------------------------------------------------------------------------
-// Webhook registration
+// 6. Webhook Registration
 // ---------------------------------------------------------------------------
 
-export async function registerWebhook(url: string): Promise<KotaniApiResponse<any>> {
-  if (isDemoMode()) {
+export async function registerWebhook(url: string): Promise<KotaniResponse<any>> {
+  if (!isLive()) {
     await demoDelay();
     return { success: true, statusCode: 200, message: 'Webhook registered (demo)' };
   }
+  return apiCall<any>('POST', '/api/v3/webhook', {
+    url,
+    events: ['offramp.completed', 'offramp.failed', 'onramp.completed', 'onramp.failed'],
+  });
+}
 
-  try {
-    const res = await fetch(`${BASE_URL}/api/v3/webhook`, {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify({
-        url,
-        events: ['offramp.completed', 'offramp.failed', 'onramp.completed', 'onramp.failed'],
-      }),
-    });
-    const json = await res.json();
-    return { success: res.ok, statusCode: res.status, ...json };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { success: false, statusCode: 0, message: `Network error: ${msg}`, error: msg };
+// ---------------------------------------------------------------------------
+// 7. Health check
+// ---------------------------------------------------------------------------
+
+export async function healthCheck(): Promise<KotaniResponse<any>> {
+  if (!isLive()) {
+    return { success: true, statusCode: 200, message: 'Demo mode' };
   }
-}
-
-// ---------------------------------------------------------------------------
-// Webhook payload verification
-// ---------------------------------------------------------------------------
-
-export function verifyWebhookSignature(
-  payload: any,
-  signature: string,
-  secret: string
-): boolean {
-  if (isDemoMode()) return true;
-  // In production, verify HMAC-SHA256 signature
-  // const crypto = require('crypto');
-  // const expected = crypto.createHmac('sha256', secret).update(JSON.stringify(payload)).digest('hex');
-  // return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-  return signature === secret;
-}
-
-// ---------------------------------------------------------------------------
-// Helper: Generate unique reference ID
-// ---------------------------------------------------------------------------
-
-export function generateReferenceId(): string {
-  return isDemoMode()
-    ? nextDemoRefId()
-    : `twala-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return apiCall<any>('GET', '/health');
 }

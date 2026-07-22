@@ -17,12 +17,8 @@ const config = {
     username: process.env.AT_USERNAME || 'sandbox',
     apiKey: process.env.AT_API_KEY || '',
     senderId: process.env.AT_SENDER_ID || 'TWAALA',
-    // OpenAPI spec: sandbox → api.sandbox.africastalking.com, production → api.africastalking.com
-    get baseUrl(): string {
-      return this.username === 'sandbox'
-        ? 'https://api.sandbox.africastalking.com/version1'
-        : 'https://api.africastalking.com/version1';
-    },
+    baseUrl: 'https://api.africastalking.com/version1',
+    sandboxUrl: 'https://api.sandbox.africastalking.com/version1',
   },
   twala: {
     feePercent: 0.5,
