@@ -13,6 +13,7 @@ import kotaniRouter from './routes/kotani.js';
 import * as stellar from './services/stellar.js';
 import * as db from './services/database.js';
 import * as kotani from './services/kotani.js';
+import { sendTransferNotification } from './services/sms.js';
 import { notifyChange, getChangeVersion } from './services/events.js';
 
 function getLanIp(): string {
@@ -66,6 +67,25 @@ app.use('/api/history', historyRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/rates', ratesRouter);
 app.use('/api/kotani', kotaniRouter);
+
+// POST /api/sms/test — quick SMS test endpoint
+app.post('/api/sms/test', express.json(), async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ success: false, message: 'phone required' });
+    const result = await sendTransferNotification({
+      phoneNumber: phone,
+      recipientName: 'Test Recipient',
+      amountUgx: 50000,
+      amountUsdc: 10,
+      senderName: 'Twala Test',
+    });
+    res.json({ success: result.success, data: result });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, message: msg });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Kotani offramp completion listener — auto-completes demo mode transactions
@@ -128,6 +148,7 @@ app.listen(config.port, '0.0.0.0', async () => {
   console.log(`  Horizon : ${config.stellar.horizonUrl}`);
   console.log(`  Port    : ${config.port}`);
   console.log(`  Kotani  : ${config.kotani.apiKey ? 'Configured ✓' : 'Demo mode'}`);
+  console.log(`  SMS     : ${config.africasTalking.apiKey ? `LIVE (${config.africasTalking.username})` : 'Demo mode (no AT key)'}`);
   const lanIp = getLanIp();
   console.log(`  Address : http://localhost:${config.port}`);
   console.log(`  LAN     : http://${lanIp}:${config.port}`);

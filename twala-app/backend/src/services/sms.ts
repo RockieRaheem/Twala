@@ -21,8 +21,11 @@ async function sendViaApi(to: string, message: string): Promise<SmsResult> {
       username: config.africasTalking.username,
       to,
       message,
-      from: config.africasTalking.senderId,
     });
+    // Only include 'from' if we have a non-sandbox sender ID (sandbox ignores custom IDs)
+    if (config.africasTalking.senderId && config.africasTalking.username !== 'sandbox') {
+      params.append('from', config.africasTalking.senderId);
+    }
 
     const res = await fetch('https://api.africastalking.com/version1/messaging', {
       method: 'POST',
