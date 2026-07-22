@@ -223,8 +223,12 @@ async function executeToolCall(toolCall: any): Promise<string> {
       }
 
       case 'contribute_to_goal': {
+        const before = await db.getGoal(args.goalId);
+        if (!before) return `❌ Goal not found.`;
+        if (before.status === 'completed') return `⚠️ "${before.title}" is already **completed** 🎉 — no additional contributions needed. You achieved it!`;
+        if (before.status === 'cancelled') return `⚠️ "${before.title}" was **cancelled** — you can create a new goal instead.`;
         const goal = await db.contributeToGoal(args.goalId, args.amountUgx);
-        if (!goal) return `❌ Goal not found.`;
+        if (!goal) return `❌ Failed to contribute to goal.`;
         await db.createTransaction({
           type: 'received', amountUsdc: args.amountUgx / 3750, amountUgx: args.amountUgx,
           rate: 3750, recipientName: `Contribution to ${goal.title}`, purpose: 'Goal Contribution',

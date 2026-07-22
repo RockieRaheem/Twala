@@ -131,6 +131,10 @@ export async function deleteGoal(id: string): Promise<void> {
 
 export async function updateGoal(id: string, updates: Partial<Goal>): Promise<Goal | null> {
   const dbUpdates: Record<string, any> = { updated_at: new Date().toISOString() };
+  if (updates.title !== undefined) dbUpdates.title = updates.title;
+  if (updates.description !== undefined) dbUpdates.description = updates.description;
+  if (updates.targetAmountUgx !== undefined) dbUpdates.target_amount_ugx = updates.targetAmountUgx;
+  if (updates.category !== undefined) dbUpdates.category = updates.category;
   if (updates.savedAmountUgx !== undefined) dbUpdates.saved_amount_ugx = updates.savedAmountUgx;
   if (updates.status !== undefined) dbUpdates.status = updates.status;
   if (updates.milestones !== undefined) dbUpdates.milestones = updates.milestones;
