@@ -5,43 +5,15 @@ import * as kotani from './kotani.js';
 import config from '../config.js';
 import type { ChatMessage, AiContext } from '../types/index.js';
 
-const GEMINI_API_KEY = () => process.env.GEMINI_API_KEY || '';
-const GROQ_API_KEY = () => process.env.GROQ_API_KEY || '';
-
 const KOTANI_ESCROW_ADDRESS = 'GA7Q5OQJ6X4G6T5ZVQ4Q3Z6H5KQ7R5QKZ6H5KQ7R5QKZ6H5KQ7R5QKZ6';
 
-const GROQ_MODELS = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile'];
+// Models in priority order (best function-calling first, then fallbacks)
+const GROQ_MODELS = ['llama-3.3-70b-versatile', 'gemma2-9b-it', 'llama-3.1-8b-instant'];
 
 let _pendingNavigate: { screen: string; goalId?: string } | null = null;
 
 // ---------------------------------------------------------------------------
-// Context builder
-// ---------------------------------------------------------------------------
-
-async function buildContext(): Promise<AiContext> {
-  try {
-    const wallet = await db.getWallet();
-    const goals = await db.getGoals();
-    const { transactions } = await db.getTransactions({ limit: 5 });
-
-    let liveBalance = 0;
-    if (wallet?.publicKey) {
-      try { const b = await stellar.getBalance(wallet.publicKey); liveBalance = b.usdc; } catch { }
-    }
-
-    return {
-      walletBalance: liveBalance,
-      goals,
-      recentTransactions: transactions,
-      activeGoal: goals.find((g) => g.status === 'active') || undefined,
-    };
-  } catch {
-    return { walletBalance: 0, goals: [], recentTransactions: [], activeGoal: undefined };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Formatters
+// Helpers
 // ---------------------------------------------------------------------------
 
 function fiat(amount: number): string {
@@ -60,7 +32,26 @@ function percent(a: number, b: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// System prompt
+// Context builder
+// ---------------------------------------------------------------------------
+
+async function buildContext(): Promise<AiContext> {
+  try {
+    const wallet = await db.getWallet();
+    const goals = await db.getGoals();
+    const { transactions } = await db.getTransactions({ limit: 5 });
+    let liveBalance = 0;
+    if (wallet?.publicKey) {
+      try { const b = await stellar.getBalance(wallet.publicKey); liveBalance = b.usdc; } catch {}
+    }
+    return { walletBalance: liveBalance, goals, recentTransactions: transactions, activeGoal: goals.find((g) => g.status === 'active') };
+  } catch {
+    return { walletBalance: 0, goals: [], recentTransactions: [], activeGoal: undefined };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// System prompt (compact)
 // ---------------------------------------------------------------------------
 
 function buildSystemPrompt(ctx: AiContext): string {
@@ -69,7 +60,6 @@ function buildSystemPrompt(ctx: AiContext): string {
         `- "${g.title}" (${fiat(g.savedAmountUgx)}/${fiat(g.targetAmountUgx)}, ${percent(g.savedAmountUgx, g.targetAmountUgx)}%, id="${g.id}")`
       ).join('\n')
     : '(none)';
-
   const txBrief = ctx.recentTransactions.length > 0
     ? ctx.recentTransactions.map((t) =>
         `- ${t.type === 'sent' ? '→' : '←'} ${usdc(t.amountUsdc)} ${t.recipientName} (${t.status})`
@@ -91,11 +81,11 @@ You can perform these actions via function calls — DO IT when asked:
 5. delete_goal(goalId)
 6. navigate(screen, goalId?) — go to Dashboard | Goals | Transfer | History | GoalDetail
 
-Be warm and helpful. Use markdown. Never fabricate data.`;
+Respond warmly with markdown. Never fabricate data. After executing an action, explain what happened.`;
 }
 
 // ---------------------------------------------------------------------------
-// Tools
+// Tool definitions
 // ---------------------------------------------------------------------------
 
 const TOOLS: any[] = [
@@ -198,7 +188,7 @@ const TOOLS: any[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Tool execution
+// Tool execution (returns clean human-readable messages, no raw JSON)
 // ---------------------------------------------------------------------------
 
 async function executeToolCall(toolCall: any): Promise<string> {
@@ -210,38 +200,36 @@ async function executeToolCall(toolCall: any): Promise<string> {
     switch (name) {
       case 'create_goal': {
         const goal = await db.createGoal({
-          title: args.title,
-          description: args.description || '',
-          targetAmountUgx: args.targetAmountUgx,
-          category: args.category || 'other',
+          title: args.title, description: args.description || '',
+          targetAmountUgx: args.targetAmountUgx, category: args.category || 'other',
         });
-        return `✅ Created goal "${goal.title}" — target ${fiat(goal.targetAmountUgx)}. ID: ${goal.id}`;
+        return `✅ Created goal "${goal.title}" — target ${fiat(goal.targetAmountUgx)}.`;
       }
 
       case 'contribute_to_goal': {
         const goal = await db.contributeToGoal(args.goalId, args.amountUgx);
-        if (!goal) return `❌ Goal not found: ${args.goalId}`;
+        if (!goal) return `❌ Goal not found.`;
         await db.createTransaction({
           type: 'received', amountUsdc: args.amountUgx / 3750, amountUgx: args.amountUgx,
           rate: 3750, recipientName: `Contribution to ${goal.title}`, purpose: 'Goal Contribution',
           status: 'completed', goalId: goal.id,
         });
-        const remaining = goal.targetAmountUgx - goal.savedAmountUgx;
         const pct = percent(goal.savedAmountUgx, goal.targetAmountUgx);
+        const remaining = goal.targetAmountUgx - goal.savedAmountUgx;
         let msg = `✅ Added ${fiat(args.amountUgx)} to "${goal.title}". Now ${fiat(goal.savedAmountUgx)}/${fiat(goal.targetAmountUgx)} (${pct}%)`;
-        if (remaining > 0) msg += `. ${fiat(remaining)} remaining 🎯`;
-        else msg += ` 🎉 Fully funded!`;
+        if (remaining > 0) msg += `. ${fiat(remaining)} remaining to reach your goal! 🎯`;
+        else msg += ` 🎉 Fully funded — congratulations!`;
         return msg;
       }
 
       case 'send_money': {
         const amountUsdc = typeof args.amountUsdc === 'string' ? parseFloat(args.amountUsdc) : args.amountUsdc;
-        if (isNaN(amountUsdc)) return `❌ Invalid amount: ${args.amountUsdc}`;
+        if (isNaN(amountUsdc)) return `❌ Invalid amount.`;
         const network = args.recipientNetwork?.toUpperCase() === 'AIRTEL' ? 'AIRTEL' : 'MTN';
         const wallet = await db.getWallet();
-        if (!wallet) return '❌ No wallet found.';
+        if (!wallet) return '❌ No wallet found. Create a wallet first.';
         const balance = await stellar.getBalance(wallet.publicKey);
-        if (amountUsdc > balance.usdc) return `❌ Insufficient balance. You have ${usdc(balance.usdc)} USDC.`;
+        if (amountUsdc > balance.usdc) return `❌ You have ${usdc(balance.usdc)} USDC, but trying to send ${usdc(amountUsdc)}.`;
         if (amountUsdc < config.twala.minTransferUsdc) return `❌ Minimum is ${config.twala.minTransferUsdc} USDC.`;
         if (amountUsdc > config.twala.maxTransferUsdc) return `❌ Maximum is ${config.twala.maxTransferUsdc} USDC.`;
 
@@ -252,7 +240,9 @@ async function executeToolCall(toolCall: any): Promise<string> {
         let stellarTxHash = '';
         try {
           await stellar.ensureTrustline(wallet.secretKey);
-          stellarTxHash = await stellar.submitPayment(wallet.secretKey, KOTANI_ESCROW_ADDRESS, quote.sendAmountUsdc.toFixed(7), referenceId);
+          stellarTxHash = await stellar.submitPayment(
+            wallet.secretKey, KOTANI_ESCROW_ADDRESS, quote.sendAmountUsdc.toFixed(7), referenceId,
+          );
         } catch { stellarTxHash = `demo-${Date.now()}`; }
 
         const kotaniResult = await kotani.createOfframp({
@@ -264,15 +254,16 @@ async function executeToolCall(toolCall: any): Promise<string> {
           type: 'sent', amountUsdc: quote.sendAmountUsdc, amountUgx: quote.receiveAmountUgx,
           rate: quote.rate, recipientName: args.recipientName, recipientPhone: args.recipientPhone || '',
           recipientNetwork: network, status: 'pending', purpose: args.purpose || 'Transfer',
-          stellarTxHash, kotaniReferenceId: referenceId, kotaniStatus: kotaniResult.data?.status || 'pending',
+          stellarTxHash, kotaniReferenceId: referenceId,
+          kotaniStatus: kotaniResult.data?.status || 'pending',
         });
 
-        return `✅ **Sent ${usdc(quote.sendAmountUsdc)} to ${args.recipientName}!**\n- Delivery: ~${fiat(quote.receiveAmountUgx)} UGX via ${network}\n- Fee: ${usdc(quote.feeUsdc)}\n- Ref: ${referenceId.slice(-8)}`;
+        return `✅ **Sent ${usdc(quote.sendAmountUsdc)} to ${args.recipientName}!** Delivery: ~${fiat(quote.receiveAmountUgx)} UGX via ${network}. Fee: ${usdc(quote.feeUsdc)}. Ref: ${referenceId.slice(-8)}`;
       }
 
       case 'update_goal': {
         const existing = await db.getGoal(args.goalId);
-        if (!existing) return `❌ Goal not found: ${args.goalId}`;
+        if (!existing) return `❌ Goal not found.`;
         const updates: Record<string, any> = {};
         if (args.title !== undefined) updates.title = args.title;
         if (args.description !== undefined) updates.description = args.description;
@@ -286,17 +277,19 @@ async function executeToolCall(toolCall: any): Promise<string> {
 
       case 'delete_goal': {
         const goal = await db.getGoal(args.goalId);
-        if (!goal) return `❌ Goal not found: ${args.goalId}`;
+        if (!goal) return `❌ Goal not found.`;
         await db.deleteGoal(args.goalId);
         return `✅ Goal "${goal.title}" deleted permanently.`;
       }
 
       case 'navigate': {
         _pendingNavigate = { screen: args.screen, goalId: args.goalId };
-        return `__NAVIGATE__:{"screen":"${args.screen}"${args.goalId ? `,"goalId":"${args.goalId}"` : ''}}`;
+        const dest = args.screen === 'GoalDetail' ? `the "${args.goalId}" goal details` : `the ${args.screen} screen`;
+        return `✅ Navigating to ${dest}...`;
       }
 
-      default: return `❌ Unknown action: ${name}`;
+      default:
+        return `❌ Unknown action: ${name}`;
     }
   } catch (err: any) {
     return `❌ Error executing ${name}: ${err.message}`;
@@ -308,20 +301,17 @@ async function executeToolCall(toolCall: any): Promise<string> {
 // ---------------------------------------------------------------------------
 
 async function callGemini(userMessage: string, ctx: AiContext, history: ChatMessage[]): Promise<string | null> {
-  const key = GEMINI_API_KEY();
+  const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
   try {
     const contents: any[] = [];
     for (const msg of history.slice(-10)) {
-      contents.push({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }],
-      });
+      contents.push({ role: msg.role === 'assistant' ? 'model' : 'user', parts: [{ text: msg.content }] });
     }
     contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`,
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + key,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -331,41 +321,36 @@ async function callGemini(userMessage: string, ctx: AiContext, history: ChatMess
           contents,
           generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
         }),
-      }
+      },
     );
-    if (!res.ok) { console.error(`Gemini ${res.status}`); return null; }
+    if (!res.ok) { const body = await res.text().catch(() => ''); console.error(`Gemini ${res.status}:`, body); return null; }
     const data: any = await res.json();
     return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
   } catch (err) { console.error('Gemini fail:', err); return null; }
 }
 
 // ---------------------------------------------------------------------------
-// Groq
+// Groq — tries models in priority order, returns null if all exhausted
 // ---------------------------------------------------------------------------
 
 async function callGroq(userMessage: string, ctx: AiContext, history: ChatMessage[]): Promise<string | null> {
-  const key = GROQ_API_KEY();
+  const key = process.env.GROQ_API_KEY;
   if (!key) return null;
 
   for (const model of GROQ_MODELS) {
     try {
       const result = await tryGroqModel(model, key, userMessage, ctx, history);
       if (result !== null) return result;
-    } catch (err) {
-      console.error(`Groq ${model} error:`, err);
-    }
-    console.warn(`  Groq ${model} failed, trying next...`);
+    } catch (err) { console.error(`Groq ${model} exception:`, err); }
+    console.warn(`  Groq ${model}: no response, trying next...`);
   }
-
   return null;
 }
 
 async function tryGroqModel(
   model: string, key: string, userMessage: string, ctx: AiContext, history: ChatMessage[],
 ): Promise<string | null> {
-  const messages: any[] = [
-    { role: 'system', content: buildSystemPrompt(ctx) },
-  ];
+  const messages: any[] = [{ role: 'system', content: buildSystemPrompt(ctx) }];
   for (const msg of history.slice(-10)) {
     messages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: msg.content });
   }
@@ -380,9 +365,9 @@ async function tryGroqModel(
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    if (response.status === 429) return null;
+    if (response.status === 429) return null; // rate limited -> try next model
     if (response.status === 400 && body.includes('tool call validation')) {
-      return await tryGroqText(model, key, messages);
+      return await groqTextFallback(model, key, messages);
     }
     console.error(`Groq ${model} ${response.status}:`, body);
     return null;
@@ -392,18 +377,19 @@ async function tryGroqModel(
   const choice = data?.choices?.[0]?.message;
   if (!choice) return null;
 
+  // No tool calls — return the text directly
   if (!choice.tool_calls || choice.tool_calls.length === 0) {
     return choice.content || null;
   }
 
-  const toolResults: string[] = [];
+  // Execute tools
   for (const toolCall of choice.tool_calls) {
     const result = await executeToolCall(toolCall);
-    toolResults.push(result);
     messages.push({ role: 'assistant', content: null, tool_calls: [toolCall] });
     messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
   }
 
+  // Round 2: ask the model to synthesize a response from tool results
   const finalRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
@@ -411,12 +397,22 @@ async function tryGroqModel(
     body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1024 }),
   });
 
-  if (!finalRes.ok) return toolResults.join('\n\n');
-  const finalData: any = await finalRes.json();
-  return finalData?.choices?.[0]?.message?.content?.trim() || toolResults.join('\n\n');
+  if (finalRes.ok) {
+    const finalData: any = await finalRes.json();
+    const finalContent = finalData?.choices?.[0]?.message?.content?.trim();
+    if (finalContent) return finalContent;
+  }
+
+  // Second round failed — build a clean summary from tool results instead
+  const lastToolResults = messages.filter((m: any) => m.role === 'tool').map((m: any) => m.content);
+  if (lastToolResults.length > 0) {
+    return lastToolResults.join('\n\n');
+  }
+
+  return null;
 }
 
-async function tryGroqText(model: string, key: string, messages: any[]): Promise<string | null> {
+async function groqTextFallback(model: string, key: string, messages: any[]): Promise<string | null> {
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -434,48 +430,46 @@ async function tryGroqText(model: string, key: string, messages: any[]): Promise
 // Startup log
 // ---------------------------------------------------------------------------
 
-console.log(`  AI      : ${GEMINI_API_KEY() ? 'Gemini ✓' : 'Gemini ✗'} | ${GROQ_API_KEY() ? `Groq ✓ (${GROQ_MODELS.join(', ')})` : 'Groq ✗'}`);
+console.log(`  AI      : ${process.env.GEMINI_API_KEY ? 'Gemini ✓ (2.5 Flash)' : 'Gemini ✗'} | ${process.env.GROQ_API_KEY ? `Groq ✓ (${GROQ_MODELS.join(', ')})` : 'Groq ✗'}`);
 
 // ---------------------------------------------------------------------------
-// Public API — EVERYTHING wrapped in try/catch so it NEVER throws
+// Public API — never throws
 // ---------------------------------------------------------------------------
 
 export async function chat(userMessage: string): Promise<{ messages: ChatMessage[]; navigate: { screen: string; goalId?: string } | null }> {
   _pendingNavigate = null;
 
-  // 1. Save user message (best effort)
+  // 1. Save user message (best-effort)
   try { await db.addChatMessage({ role: 'user', content: userMessage }); } catch (e) { console.error('Failed to save user msg:', e); }
 
-  // 2. Build context
+  // 2. Build context + get history
   const ctx = await buildContext();
-
-  // 3. Get fresh history
   let history: ChatMessage[] = [];
-  try { history = await db.getChatMessages(); } catch (e) { console.error('Failed to get history:', e); }
+  try { history = await db.getChatMessages(); } catch (e) { console.error('Failed to load history:', e); }
 
-  // 4. Try AI providers
+  // 3. Try AI providers
   let reply: string | null = null;
 
-  if (GROQ_API_KEY()) {
+  if (process.env.GROQ_API_KEY) {
     try { reply = await callGroq(userMessage, ctx, history); } catch (e) { console.error('Groq exception:', e); }
   }
 
-  if (!reply && GEMINI_API_KEY()) {
+  if (!reply && process.env.GEMINI_API_KEY) {
     try { reply = await callGemini(userMessage, ctx, history); } catch (e) { console.error('Gemini exception:', e); }
   }
 
-  // 5. Fallback if all providers failed
+  // 4. Always generate a response
   if (!reply) {
-    reply = "I'm sorry, I'm having trouble connecting right now due to rate limits. Please try again in a moment. In the meantime, you can use the Goals and Transfer tabs directly.";
-    console.warn('  AI: All providers failed, using fallback message');
+    reply = "I'm here to help! You can ask me to send money to Uganda, create or manage savings goals, check your balance, or navigate to any screen in the app. What would you like to do?";
+    console.warn('  AI: all providers exhausted, using fallback');
   }
 
-  // 6. Save reply
+  // 5. Save assistant reply
   try { await db.addChatMessage({ role: 'assistant', content: reply }); } catch (e) { console.error('Failed to save reply:', e); }
 
-  // 7. Return messages
+  // 6. Return messages
   let messages: ChatMessage[] = [];
-  try { messages = await db.getChatMessages(); } catch (e) { console.error('Failed to get final messages:', e); }
+  try { messages = await db.getChatMessages(); } catch (e) { console.error('Failed to get messages:', e); }
 
   return { messages, navigate: _pendingNavigate };
 }
