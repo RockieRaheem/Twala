@@ -1,10 +1,10 @@
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
-import { goalsApi, type GoalData } from '../services/api';
+import { goalsApi, historyApi, setPendingGoalId, type GoalData, type TransactionItem } from '../services/api';
 
-const TABS = ['Overview', 'Milestones'];
+const TABS = ['Overview', 'Milestones', 'Transactions'];
 
 function formatUgx(ugx: number): string {
   if (ugx >= 1_000_000) return `UGX ${(ugx / 1_000_000).toFixed(1)}M`;
@@ -26,13 +26,41 @@ function getGoalIcon(title: string): string {
   return 'piggy-bank';
 }
 
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function getTxIcon(type: string, status: string): string {
+  if (status === 'failed') return 'close-circle';
+  if (type === 'sent') return 'send';
+  return 'download';
+}
+
+function getTxColor(status: string): string {
+  if (status === 'completed') return Colors.primary;
+  if (status === 'failed') return Colors.error;
+  return Colors.secondary;
+}
+
 export default function GoalDetail({ goalId, onBack }: { goalId?: string | null; onBack?: () => void }) {
   const [activeTab, setActiveTab] = useState('Overview');
   const [goal, setGoal] = useState<GoalData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [transactions, setTransactions] = useState<TransactionItem[]>([]);
+  const [txLoading, setTxLoading] = useState(false);
 
-  useEffect(() => {
+  const fetchGoal = useCallback(() => {
     if (!goalId) { setLoading(false); return; }
     goalsApi.get(goalId).then((res) => {
       if (res.success && res.data) {
@@ -46,6 +74,30 @@ export default function GoalDetail({ goalId, onBack }: { goalId?: string | null;
       setLoading(false);
     });
   }, [goalId]);
+
+  const fetchTransactions = useCallback(() => {
+    if (!goalId) return;
+    setTxLoading(true);
+    historyApi.list('all', 1, goalId).then((res) => {
+      if (res.success && res.data) {
+        setTransactions(res.data.transactions || []);
+      }
+      setTxLoading(false);
+    }).catch(() => setTxLoading(false));
+  }, [goalId]);
+
+  useEffect(() => { fetchGoal(); }, [fetchGoal]);
+
+  useEffect(() => {
+    if (activeTab === 'Transactions') fetchTransactions();
+  }, [activeTab, fetchTransactions]);
+
+  const handleSendToGoal = () => {
+    if (goalId) {
+      setPendingGoalId(goalId);
+      onBack?.();
+    }
+  };
 
   const pct = goal && goal.targetAmountUgx > 0 ? Math.round((goal.savedAmountUgx / goal.targetAmountUgx) * 100) : 0;
 
@@ -85,9 +137,17 @@ export default function GoalDetail({ goalId, onBack }: { goalId?: string | null;
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Kanzu</Text>
         </View>
+        <TouchableOpacity style={styles.sendButton} onPress={handleSendToGoal} activeOpacity={0.8}>
+          <MaterialCommunityIcons name="send" size={16} color={Colors.onPrimary} />
+          <Text style={styles.sendButtonText}>Send Money</Text>
+        </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={activeTab === 'Transactions' ? <RefreshControl refreshing={txLoading} onRefresh={fetchTransactions} tintColor={Colors.primary} /> : undefined}
+      >
         <View style={styles.heroSection}>
           <View style={styles.heroBanner}>
             <View style={styles.heroIconWrap}>
@@ -237,6 +297,52 @@ export default function GoalDetail({ goalId, onBack }: { goalId?: string | null;
             )}
           </View>
         )}
+
+        {activeTab === 'Transactions' && (
+          <View style={styles.tabContent}>
+            <Text style={styles.sectionTitle}>Transaction History</Text>
+            {transactions.length === 0 ? (
+              <View style={styles.emptyTx}>
+                <MaterialCommunityIcons name="swap-horizontal-bold" size={48} color={Colors.outlineVariant} />
+                <Text style={styles.emptyTxTitle}>No transactions yet</Text>
+                <Text style={styles.emptyTxDesc}>Send money to this goal to see it here</Text>
+                <TouchableOpacity style={styles.emptyTxButton} onPress={handleSendToGoal} activeOpacity={0.8}>
+                  <MaterialCommunityIcons name="send" size={16} color={Colors.onPrimary} />
+                  <Text style={styles.emptyTxButtonText}>Send Money</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              transactions.map((tx) => (
+                <View key={tx.id} style={styles.txItem}>
+                  <View style={[styles.txIconWrap, { backgroundColor: getTxColor(tx.status) + '1A' }]}>
+                    <MaterialCommunityIcons
+                      name={getTxIcon(tx.type, tx.status) as any}
+                      size={20}
+                      color={getTxColor(tx.status)}
+                    />
+                  </View>
+                  <View style={styles.txInfo}>
+                    <View style={styles.txTop}>
+                      <Text style={styles.txRecipient} numberOfLines={1}>{tx.recipientName}</Text>
+                      <Text style={styles.txAmount}>
+                        {tx.type === 'sent' ? '-' : '+'}${tx.amountUsdc.toFixed(2)}
+                      </Text>
+                    </View>
+                    <View style={styles.txBottom}>
+                      <View style={[styles.txStatusBadge, { backgroundColor: getTxColor(tx.status) + '1A' }]}>
+                        <Text style={[styles.txStatusText, { color: getTxColor(tx.status) }]}>{tx.status}</Text>
+                      </View>
+                      {tx.amountUgx ? (
+                        <Text style={styles.txUgx}>UGX {tx.amountUgx.toLocaleString()}</Text>
+                      ) : null}
+                      <Text style={styles.txTime}>{formatTimestamp(tx.createdAt)}</Text>
+                    </View>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -252,6 +358,12 @@ const styles = StyleSheet.create({
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm },
   backButton: { padding: 8, borderRadius: BorderRadius.full },
   headerTitle: { fontSize: Typography.headlineMd.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.primary },
+  sendButton: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: Colors.primary, paddingHorizontal: 16, paddingVertical: 8,
+    borderRadius: BorderRadius.full, ...Shadow.level1,
+  },
+  sendButtonText: { fontSize: Typography.labelSm.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onPrimary },
   scrollContent: { paddingBottom: 100 },
   heroSection: { paddingHorizontal: Spacing.containerPaddingMobile, paddingTop: Spacing.gutter },
   heroBanner: {
@@ -303,4 +415,20 @@ const styles = StyleSheet.create({
   milestoneTarget: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.secondary, fontWeight: '500' },
   milestoneDateRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
   milestoneDate: { fontSize: 11, fontFamily: 'Inter', color: Colors.outline },
+  emptyTx: { alignItems: 'center', paddingVertical: 40, gap: Spacing.stackSm },
+  emptyTxTitle: { fontSize: Typography.headlineSm.fontSize, fontFamily: 'Montserrat', fontWeight: '600', color: Colors.onSurfaceVariant },
+  emptyTxDesc: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', color: Colors.outline, textAlign: 'center' },
+  emptyTxButton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.primary, paddingHorizontal: 20, paddingVertical: 12, borderRadius: BorderRadius.full, marginTop: Spacing.stackMd, ...Shadow.level1 },
+  emptyTxButtonText: { fontSize: Typography.labelMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onPrimary },
+  txItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.stackSm, backgroundColor: Colors.surfaceContainerLowest, padding: Spacing.stackMd, borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: Colors.outlineVariant + '33', ...Shadow.level1 },
+  txIconWrap: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+  txInfo: { flex: 1 },
+  txTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  txRecipient: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', fontWeight: '600', color: Colors.onSurface, flex: 1, marginRight: 8 },
+  txAmount: { fontSize: Typography.bodyMd.fontSize, fontFamily: 'Inter', fontWeight: '700', color: Colors.primary },
+  txBottom: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  txStatusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: BorderRadius.full },
+  txStatusText: { fontSize: 10, fontFamily: 'Inter', fontWeight: '700' },
+  txUgx: { fontSize: Typography.bodySm.fontSize, fontFamily: 'Inter', color: Colors.onSurfaceVariant },
+  txTime: { fontSize: 10, fontFamily: 'Inter', color: Colors.outline, marginLeft: 'auto' },
 });

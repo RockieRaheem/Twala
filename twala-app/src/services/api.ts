@@ -53,6 +53,16 @@ export function notifyChange() { _changeCounter++; }
 export function getChangeCounter() { return _changeCounter; }
 
 // ---------------------------------------------------------------------------
+// Cross-screen navigation state — lets GoalDetail signal SmartTransfer
+// ---------------------------------------------------------------------------
+
+let _pendingGoalId: string | null = null;
+
+export function setPendingGoalId(id: string | null) { _pendingGoalId = id; }
+
+export function getPendingGoalId(): string | null { return _pendingGoalId; }
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -78,6 +88,7 @@ export interface TransactionItem {
   status: 'pending' | 'completed' | 'failed';
   purpose: string;
   stellarTxHash?: string;
+  goalId?: string;
   createdAt: string;
 }
 
@@ -165,7 +176,7 @@ export const transferApi = {
   quote: (amount: number) =>
     request<TransferQuote>(`/transfer/quote?amount=${amount}`),
 
-  offramp: (body: { amountUsdc: number; recipientName: string; recipientPhone?: string; recipientNetwork?: string; purpose: string }) =>
+  offramp: (body: { amountUsdc: number; recipientName: string; recipientPhone?: string; recipientNetwork?: string; purpose: string; goalId?: string }) =>
     request<{ transaction: TransactionItem; quote: TransferQuote; kotaniReferenceId: string; message: string }>(
       '/transfer/offramp', { method: 'POST', body: JSON.stringify(body) }
     ),
@@ -183,9 +194,9 @@ export const transferApi = {
 };
 
 export const historyApi = {
-  list: (filter?: string, page = 1) =>
+  list: (filter?: string, page = 1, goalId?: string) =>
     request<{ transactions: TransactionItem[]; stats: { totalSent: number; totalReceived: number; thisMonth: number }; pagination: any }>(
-      `/history?filter=${filter || 'all'}&page=${page}`
+      `/history?filter=${filter || 'all'}&page=${page}${goalId ? `&goalId=${goalId}` : ''}`
     ),
 };
 

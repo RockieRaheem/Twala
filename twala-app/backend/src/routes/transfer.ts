@@ -47,7 +47,7 @@ router.get('/quote', async (req, res) => {
 
 router.post('/offramp', async (req, res) => {
   try {
-    const { amountUsdc, recipientName, recipientPhone, recipientNetwork, purpose } = req.body;
+    const { amountUsdc, recipientName, recipientPhone, recipientNetwork, purpose, goalId } = req.body;
 
     const errors: string[] = [];
     if (!amountUsdc || amountUsdc <= 0) errors.push('Valid amountUsdc required');
@@ -123,7 +123,13 @@ router.post('/offramp', async (req, res) => {
       stellarTxHash,
       kotaniReferenceId: referenceId,
       kotaniStatus: kotaniResult.data?.status || 'pending',
+      goalId: goalId || undefined,
     });
+
+    // If goalId provided, also contribute the UGX amount to the goal
+    if (goalId) {
+      await db.contributeToGoal(goalId, quote.receiveAmountUgx);
+    }
 
     res.json({
       success: true,

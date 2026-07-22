@@ -2,7 +2,7 @@ import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Animat
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
-import { transferApi, ratesApi } from '../services/api';
+import { transferApi, ratesApi, goalsApi, getPendingGoalId, setPendingGoalId, type GoalData } from '../services/api';
 import DismissKeyboard from '../components/DismissKeyboard';
 
 type TransferMode = 'send' | 'deposit';
@@ -108,6 +108,8 @@ export default function SmartTransfer() {
   const [quote, setQuote] = useState<{ sendAmountUsdc: number; receiveAmountUgx: number; feeUsdc: number; feeUgx: number; rate: number; estimatedArrival: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [goals, setGoals] = useState<GoalData[]>([]);
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const scrollRef = useRef<ScrollView>(null);
   const amountRef = useRef<TextInput>(null);
@@ -118,9 +120,35 @@ export default function SmartTransfer() {
 
   const usdAmount = parseFloat(amount) || 0;
 
+  // Build dynamic purpose list: static purposes + user's goals
+  const goalPurposes = goals.map((g) => ({
+    label: `🎯 ${g.title}`,
+    value: `goal_${g.id}`,
+    icon: 'flag-checkered' as const,
+    desc: `Goal: ${g.savedAmountUgx.toLocaleString()} / ${g.targetAmountUgx.toLocaleString()} UGX`,
+    goalId: g.id,
+  }));
+  const allPurposes = [...goalPurposes, ...PURPOSES];
+
+  // Auto-select goal if navigated from GoalDetail
+  useEffect(() => {
+    const pendingId = getPendingGoalId();
+    if (pendingId && goals.length > 0) {
+      const match = goalPurposes.find((gp) => gp.goalId === pendingId);
+      if (match) {
+        setPendingGoalId(null);
+        setSelectedPurpose(match);
+        setSelectedGoalId(pendingId);
+      }
+    }
+  }, [goals]);
+
   useEffect(() => {
     ratesApi.get().then((res) => {
       if (res.success && res.data) setLiveRate(res.data.usdcToUgx);
+    });
+    goalsApi.list().then((res) => {
+      if (res.success && Array.isArray(res.data)) setGoals(res.data);
     });
   }, []);
 
@@ -156,13 +184,16 @@ export default function SmartTransfer() {
         recipientPhone: recipientPhone.trim() || undefined,
         recipientNetwork,
         purpose: selectedPurpose.label,
+        goalId: selectedGoalId || undefined,
       });
       setSubmitting(false);
       if (res.success) {
-        Alert.alert('Transfer Submitted!', res.data?.message || 'Your transfer is being processed.');
+        const goalMsg = selectedGoalId ? ' Funds also added to your savings goal.' : '';
+        Alert.alert('Transfer Submitted!', (res.data?.message || 'Your transfer is being processed.') + goalMsg);
         setAmount('500');
         setRecipientName('');
         setRecipientPhone('');
+        setSelectedGoalId(null);
         setQuote(null);
       } else {
         Alert.alert('Error', res.message || 'Transfer failed.');
@@ -402,11 +433,11 @@ export default function SmartTransfer() {
 
                   {showPicker && (
                     <View style={styles.pickerList}>
-                      {PURPOSES.map((p) => (
+                      {allPurposes.map((p) => (
                         <TouchableOpacity
                           key={p.value}
                           style={[styles.pickerItem, selectedPurpose.value === p.value && styles.pickerItemActive]}
-                          onPress={() => { setSelectedPurpose(p); setShowPicker(false); }}
+                          onPress={() => { setSelectedPurpose(p); setSelectedGoalId((p as any).goalId || null); setShowPicker(false); }}
                         >
                           <MaterialCommunityIcons name={p.icon} size={20} color={selectedPurpose.value === p.value ? Colors.primary : Colors.onSurfaceVariant} />
                           <View>

@@ -182,6 +182,7 @@ export async function getTransactions(options?: {
   type?: string;
   page?: number;
   limit?: number;
+  goalId?: string;
 }): Promise<{ transactions: Transaction[]; total: number }> {
   const type = options?.type;
   const page = options?.page || 1;
@@ -194,6 +195,10 @@ export async function getTransactions(options?: {
 
   if (type && type !== 'all') {
     query = query.eq('type', type);
+  }
+
+  if (options?.goalId) {
+    query = query.eq('goal_id', options.goalId);
   }
 
   const { data, error, count } = await query

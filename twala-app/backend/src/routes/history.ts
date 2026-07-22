@@ -7,8 +7,9 @@ router.get('/', async (req, res) => {
   const filter = req.query.filter as string | undefined;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
+  const goalId = req.query.goalId as string | undefined;
 
-  const { transactions, total } = await db.getTransactions({ type: filter, page, limit });
+  const { transactions, total } = await db.getTransactions({ type: filter, page, limit, goalId });
   const stats = await db.getTransactionStats();
 
   res.json({
