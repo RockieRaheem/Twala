@@ -47,27 +47,28 @@ async function trySendViaApi(to: string, message: string): Promise<SmsResult | n
     body.append('from', senderId);
   }
 
-  const url = useSandbox ? `${sandboxUrl}/messaging` : `${baseUrl}/messaging`;
+  const urls = useSandbox
+    ? [`${sandboxUrl}/messaging`, `${baseUrl}/messaging`]
+    : [`${baseUrl}/messaging`];
 
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'apikey': apiKey, 'Accept': 'application/json' },
-      body: body.toString(),
-      signal: AbortSignal.timeout(10000),
-    });
-    const text = await res.text();
-    if (res.ok) {
-      return { success: true, message: 'SMS submitted to AT', recipient: to };
-    }
-    if (res.status !== 401) {
-      return { success: false, message: `AT SMS: HTTP ${res.status}`, recipient: to };
-    }
-    return { success: false, message: 'auth failed', recipient: to };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { success: false, message: `AT SMS: ${msg}`, recipient: to };
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'apikey': apiKey, 'Accept': 'application/json' },
+        body: body.toString(),
+        signal: AbortSignal.timeout(10000),
+      });
+      const text = await res.text();
+      if (res.ok) {
+        return { success: true, message: 'SMS sent', recipient: to };
+      }
+      if (res.status !== 401) {
+        return { success: false, message: `AT SMS: HTTP ${res.status}`, recipient: to };
+      }
+    } catch { continue; }
   }
+  return { success: false, message: 'auth failed or timeout', recipient: to };
 }
 
 export async function sendTransferNotification(params: {
