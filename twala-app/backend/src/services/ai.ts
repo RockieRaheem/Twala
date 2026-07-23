@@ -232,7 +232,7 @@ const TOOLS: any[] = [
 // Tool execution (returns clean human-readable messages, no raw JSON)
 // ---------------------------------------------------------------------------
 
-async function executeToolCall(toolCall: any): Promise<string> {
+async function executeToolCall(toolCall: any, ctx: AiContext): Promise<string> {
   const { name, arguments: rawArgs } = toolCall.function;
   let args: Record<string, any>;
   try { args = JSON.parse(rawArgs); } catch { return `❌ Invalid arguments for ${name}`; }
@@ -460,7 +460,7 @@ async function tryGroqModel(
   }
 
   for (const toolCall of choice.tool_calls) {
-    const result = await executeToolCall(toolCall);
+    const result = await executeToolCall(toolCall, ctx);
     messages.push({ role: 'assistant', content: null, tool_calls: [toolCall] });
     messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result });
   }
