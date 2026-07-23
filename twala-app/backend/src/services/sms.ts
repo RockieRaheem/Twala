@@ -39,36 +39,36 @@ function logToConsole(phone: string, message: string) {
 }
 
 async function trySendViaApi(to: string, message: string): Promise<SmsResult | null> {
-  if (!config.africasTalking.apiKey) return null;
-  const { username, apiKey, senderId, baseUrl, sandboxUrl, useSandbox } = config.africasTalking;
+  const { apiKey, username, sandboxUrl, baseUrl } = config.africasTalking;
+  if (!apiKey) return null;
 
   const body = new URLSearchParams({ username, to, message, bulkSMSMode: '1' });
-  if (senderId && !useSandbox) {
-    body.append('from', senderId);
-  }
 
-  const urls = useSandbox
-    ? [`${sandboxUrl}/messaging`, `${baseUrl}/messaging`]
-    : [`${baseUrl}/messaging`];
+  const entries: { url: string; label: string }[] = [
+    { url: `${sandboxUrl}/messaging`, label: 'sandbox' },
+    { url: `${sandboxUrl}/messaging`, label: 'sandbox' },
+    { url: `${baseUrl}/messaging`, label: 'live' },
+  ];
 
-  for (const url of urls) {
+  for (const { url, label } of entries) {
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'apikey': apiKey, 'Accept': 'application/json' },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', apikey: apiKey, Accept: 'application/json' },
         body: body.toString(),
         signal: AbortSignal.timeout(10000),
       });
-      const text = await res.text();
       if (res.ok) {
-        return { success: true, message: 'SMS sent', recipient: to };
+        return { success: true, message: `SMS sent (${label})`, recipient: to };
       }
       if (res.status !== 401) {
-        return { success: false, message: `AT SMS: HTTP ${res.status}`, recipient: to };
+        return { success: false, message: `AT ${label}: HTTP ${res.status}`, recipient: to };
       }
-    } catch { continue; }
+    } catch {
+      /* try next */
+    }
   }
-  return { success: false, message: 'auth failed or timeout', recipient: to };
+  return null;
 }
 
 export async function sendTransferNotification(params: {
