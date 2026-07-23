@@ -16,7 +16,8 @@ const config = {
   africasTalking: {
     username: process.env.AT_USERNAME || 'sandbox',
     apiKey: process.env.AT_API_KEY || '',
-    senderId: process.env.AT_SENDER_ID || 'TWAALA',
+    senderId: process.env.AT_SENDER_ID || '',
+    useSandbox: process.env.AT_USE_SANDBOX !== 'false',
     baseUrl: 'https://api.africastalking.com/version1',
     sandboxUrl: 'https://api.sandbox.africastalking.com/version1',
   },

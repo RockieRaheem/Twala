@@ -40,43 +40,34 @@ function logToConsole(phone: string, message: string) {
 
 async function trySendViaApi(to: string, message: string): Promise<SmsResult | null> {
   if (!config.africasTalking.apiKey) return null;
-  const body = new URLSearchParams({ username: config.africasTalking.username, to, message });
+  const { username, apiKey, senderId, baseUrl, sandboxUrl, useSandbox } = config.africasTalking;
 
-  const attempts: { name: string; url: string; headers: Record<string, string> }[] = [
-    {
-      name: 'live',
-      url: `${config.africasTalking.baseUrl}/messaging`,
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'apikey': config.africasTalking.apiKey, 'Accept': 'application/json' },
-    },
-    {
-      name: 'sandbox',
-      url: `${config.africasTalking.sandboxUrl}/messaging`,
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'apikey': config.africasTalking.apiKey, 'Accept': 'application/json' },
-    },
-  ];
-
-  for (const attempt of attempts) {
-    try {
-      const res = await fetch(attempt.url, {
-        method: 'POST',
-        headers: attempt.headers,
-        body: body.toString(),
-        signal: AbortSignal.timeout(10000),
-      });
-      const text = await res.text();
-      if (res.status === 201 || res.status === 200) {
-        let data: any;
-        try { data = JSON.parse(text); } catch { continue; }
-        if (data?.SMSMessageData?.Recipients?.[0]?.status === 'Success') {
-          return { success: true, message: 'SMS sent', recipient: to };
-        }
-      }
-      if (res.status !== 401) {
-        return { success: false, message: `${attempt.name}: HTTP ${res.status}`, recipient: to };
-      }
-    } catch { continue; }
+  const body = new URLSearchParams({ username, to, message, bulkSMSMode: '1' });
+  if (senderId && !useSandbox) {
+    body.append('from', senderId);
   }
-  return null;
+
+  const url = useSandbox ? `${sandboxUrl}/messaging` : `${baseUrl}/messaging`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'apikey': apiKey, 'Accept': 'application/json' },
+      body: body.toString(),
+      signal: AbortSignal.timeout(10000),
+    });
+    const text = await res.text();
+    if (res.ok) {
+      return { success: true, message: 'SMS submitted to AT', recipient: to };
+    }
+    if (res.status !== 401) {
+      return { success: false, message: `AT SMS: HTTP ${res.status}`, recipient: to };
+    }
+    return { success: false, message: 'auth failed', recipient: to };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, message: `AT SMS: ${msg}`, recipient: to };
+  }
 }
 
 export async function sendTransferNotification(params: {
