@@ -52,6 +52,8 @@ router.post('/offramp', async (req, res) => {
     const errors: string[] = [];
     if (!amountUsdc || amountUsdc <= 0) errors.push('Valid amountUsdc required');
     if (!recipientName || !recipientName.trim()) errors.push('recipientName required');
+    if (!recipientPhone || !recipientPhone.trim()) errors.push('recipientPhone required for Mobile Money and SMS notification');
+    if (recipientPhone && !/^\+[1-9]\d{7,14}$/.test(recipientPhone.trim())) errors.push('recipientPhone must use E.164 format (e.g. +256712345678)');
     if (!purpose || !purpose.trim()) errors.push('purpose required');
     if (amountUsdc < config.twala.minTransferUsdc) errors.push(`Minimum transfer is ${config.twala.minTransferUsdc} USDC`);
     if (amountUsdc > config.twala.maxTransferUsdc) errors.push(`Maximum transfer is ${config.twala.maxTransferUsdc} USDC`);
@@ -139,17 +141,16 @@ router.post('/offramp', async (req, res) => {
       await db.contributeToGoal(goalId, quote.receiveAmountUgx);
     }
 
-    // Step 7: Send response immediately — SMS is fire-and-forget
-    if (recipientPhone) {
-      const fromName = (senderName || '').trim() || recipientName.trim();
-      sendTransferNotificationAsync({
-        phoneNumber: recipientPhone,
-        recipientName: recipientName.trim(),
-        amountUgx: quote.receiveAmountUgx,
-        amountUsdc: quote.sendAmountUsdc,
-        senderName: fromName,
-      });
-    }
+    // Step 7: Send response immediately — SMS is fire-and-forget.
+    // recipientPhone is validated above, so this path is never silently skipped.
+    const fromName = (senderName || '').trim() || recipientName.trim();
+    sendTransferNotificationAsync({
+      phoneNumber: recipientPhone.trim(),
+      recipientName: recipientName.trim(),
+      amountUgx: quote.receiveAmountUgx,
+      amountUsdc: quote.sendAmountUsdc,
+      senderName: fromName,
+    });
 
     res.json({
       success: true,

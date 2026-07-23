@@ -197,6 +197,8 @@ export default function SmartTransfer({ user }: Props = {}) {
       if (usdAmount < 10) return Alert.alert('Minimum 10 USDC', 'Enter at least 10 USDC to send.');
       if (!quote) return Alert.alert('No quote', 'Unable to get exchange rate. Try again.');
       if (!recipientName.trim()) return Alert.alert('Recipient Name', 'Enter the recipient name.');
+      if (!recipientPhone.trim()) return Alert.alert('Recipient Phone', 'A phone number is required for Mobile Money and SMS notification.');
+      if (!/^\+[1-9]\d{7,14}$/.test(recipientPhone.trim())) return Alert.alert('Invalid Phone', 'Use international format, for example +256712345678.');
       setSubmitting(true);
       // Safety timeout: force-stop loading if something goes wrong
       submitTimeoutRef.current = setTimeout(() => setSubmitting(false), 35000);
@@ -451,7 +453,7 @@ export default function SmartTransfer({ user }: Props = {}) {
                   <TextInput
                     ref={phoneRef}
                     style={styles.input}
-                    placeholder="Phone (optional, e.g., +256712345678)"
+                    placeholder="Phone (required, e.g., +256712345678)"
                     placeholderTextColor={Colors.outline}
                     value={recipientPhone}
                     onChangeText={setRecipientPhone}

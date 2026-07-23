@@ -162,7 +162,7 @@ const TOOLS: any[] = [
           purpose: { type: 'string', description: 'Purpose (e.g. "Family Support")' },
           confirmSelfSend: { type: 'boolean', description: 'Set to true if the user confirmed they want to send to their own number' },
         },
-        required: ['amountUsdc', 'recipientName', 'purpose'],
+        required: ['amountUsdc', 'recipientName', 'recipientPhone', 'purpose'],
       },
     },
   },
@@ -271,6 +271,8 @@ async function executeToolCall(toolCall: any, ctx: AiContext): Promise<string> {
       case 'send_money': {
         const amountUsdc = typeof args.amountUsdc === 'string' ? parseFloat(args.amountUsdc) : args.amountUsdc;
         if (isNaN(amountUsdc)) return `❌ Invalid amount.`;
+        if (!args.recipientPhone?.trim()) return '❌ A recipient phone number is required for Mobile Money and SMS notification.';
+        if (!/^\+[1-9]\d{7,14}$/.test(args.recipientPhone.trim())) return '❌ Use the recipient phone in E.164 format (for example +256712345678).';
         // Self-send guard
         if (args.recipientPhone && ctx.userPhone && args.recipientPhone.trim() === ctx.userPhone.trim() && !args.confirmSelfSend) {
           return `⚠️ **${ctx.userName}**, that number (**${ctx.userPhone}**) is your own. Sending to yourself will use network fees for no benefit. If you're sure, call send_money again with **confirmSelfSend: true**.`;
