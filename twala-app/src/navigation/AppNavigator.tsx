@@ -65,7 +65,7 @@ export default function AppNavigator() {
       case 'Goals':
         return <Goals onNavigateGoal={navigateToGoal} />;
       case 'Assistant':
-        return <AIAssistant onNavigate={(s) => navigate(s as AppScreen)} onNavigateGoal={navigateToGoal} />;
+        return <AIAssistant onNavigate={(s) => navigate(s as AppScreen)} onNavigateGoal={navigateToGoal} userName={user.name} userPhone={user.phone} />;
       case 'Transfer':
         return <SmartTransfer user={user} />;
       case 'GoalDetail':
