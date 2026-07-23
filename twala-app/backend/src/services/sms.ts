@@ -44,12 +44,12 @@ async function trySendViaApi(to: string, message: string): Promise<SmsResult | n
 
   const attempts: { name: string; url: string; headers: Record<string, string> }[] = [
     {
-      name: 'api-key',
+      name: 'live',
       url: `${config.africasTalking.baseUrl}/messaging`,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'apikey': config.africasTalking.apiKey, 'Accept': 'application/json' },
     },
     {
-      name: 'sandbox-url',
+      name: 'sandbox',
       url: `${config.africasTalking.sandboxUrl}/messaging`,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'apikey': config.africasTalking.apiKey, 'Accept': 'application/json' },
     },

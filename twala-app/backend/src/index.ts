@@ -84,6 +84,62 @@ app.post('/api/sms/test', express.json(), async (req, res) => {
   });
 });
 
+// POST /api/sms/diagnose — comprehensive AT auth diagnosis
+app.post('/api/sms/diagnose', express.json(), async (req, res) => {
+  const { phone } = req.body;
+  const testPhone = phone ? `+${phone.replace(/[\s\-\(\)]/g, '')}` : '+256700000000';
+  const at = config.africasTalking;
+  const results: any[] = [];
+
+  const combos = [
+    { name: 'Sandbox /version1/messaging (apikey)', url: `${at.sandboxUrl}/messaging`, auth: 'apiKey' },
+    { name: 'Live /version1/messaging (apikey)', url: `${at.baseUrl}/messaging`, auth: 'apiKey' },
+    { name: 'Sandbox /version1/messaging (basic)', url: `${at.sandboxUrl}/messaging`, auth: 'basic' },
+    { name: 'Live /version1/messaging (basic)', url: `${at.baseUrl}/messaging`, auth: 'basic' },
+    { name: 'Sandbox /version1/messaging/bulk (apikey)', url: `${at.sandboxUrl}/messaging/bulk`, auth: 'apiKey' },
+    { name: 'Live /version1/messaging/bulk (apikey)', url: `${at.baseUrl}/messaging/bulk`, auth: 'apiKey' },
+    { name: 'Sandbox /version1/user (apikey)', url: `${at.sandboxUrl}/user`, auth: 'apiKeyGet' },
+    { name: 'Live /version1/user (apikey)', url: `${at.baseUrl}/user`, auth: 'apiKeyGet' },
+  ];
+
+  for (const c of combos) {
+    try {
+      let res: Response;
+      if (c.auth === 'apiKeyGet') {
+        res = await fetch(`${c.url}?username=${at.username}`, {
+          headers: { 'apikey': at.apiKey, 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(8000),
+        });
+      } else {
+        const body = new URLSearchParams({ username: at.username, to: testPhone, message: 'Twaala diagnostic test' });
+        const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' };
+        if (c.auth === 'basic') {
+          headers['Authorization'] = 'Basic ' + Buffer.from(`${at.username}:${at.apiKey}`).toString('base64');
+        } else {
+          headers['apikey'] = at.apiKey;
+        }
+        res = await fetch(c.url, { method: 'POST', headers, body: body.toString(), signal: AbortSignal.timeout(8000) });
+      }
+
+      const text = await res.text();
+      let json: any = null;
+      try { json = JSON.parse(text); } catch {}
+      results.push({
+        name: c.name,
+        status: res.status,
+        statusText: res.statusText,
+        headers: Object.fromEntries(res.headers.entries()),
+        body: text.substring(0, 500),
+        json,
+      });
+    } catch (err: any) {
+      results.push({ name: c.name, error: err.name, message: err.message });
+    }
+  }
+
+  res.json({ success: true, data: { keyPrefix: at.apiKey ? at.apiKey.substring(0, 8) + '...' : '(none)', username: at.username, results } });
+});
+
 // ---------------------------------------------------------------------------
 // Kotani offramp completion listener — auto-completes demo mode transactions
 // ---------------------------------------------------------------------------
