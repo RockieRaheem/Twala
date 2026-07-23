@@ -96,6 +96,8 @@ export interface AiContext {
   goals: Goal[];
   recentTransactions: Transaction[];
   activeGoal?: Goal;
+  userName: string;
+  userPhone?: string;
 }
 
 // ---------------------------------------------------------------------------

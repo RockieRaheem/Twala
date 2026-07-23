@@ -42,7 +42,7 @@ function percent(a: number, b: number): number {
 // Context builder
 // ---------------------------------------------------------------------------
 
-async function buildContext(): Promise<AiContext> {
+async function buildContext(userName: string = 'User', userPhone?: string): Promise<AiContext> {
   try {
     const wallet = await db.getWallet();
     const goals = await db.getGoals();
@@ -51,9 +51,9 @@ async function buildContext(): Promise<AiContext> {
     if (wallet?.publicKey) {
       try { const b = await stellar.getBalance(wallet.publicKey); liveBalance = b.usdc; } catch {}
     }
-    return { walletBalance: liveBalance, goals, recentTransactions: transactions, activeGoal: goals.find((g) => g.status === 'active') };
+    return { walletBalance: liveBalance, goals, recentTransactions: transactions, activeGoal: goals.find((g) => g.status === 'active'), userName, userPhone };
   } catch {
-    return { walletBalance: 0, goals: [], recentTransactions: [], activeGoal: undefined };
+    return { walletBalance: 0, goals: [], recentTransactions: [], activeGoal: undefined, userName, userPhone };
   }
 }
 
@@ -75,6 +75,7 @@ function buildSystemPrompt(ctx: AiContext): string {
 
   return `You are Twaala, an AI financial companion for cross-border payments to Uganda.
 
+User: ${ctx.userName}${ctx.userPhone ? ` (${ctx.userPhone})` : ''}
 Wallet: ${usdc(ctx.walletBalance)} USDC
 Goals:\n${goalsBrief}
 Recent txs:\n${txBrief}
@@ -320,7 +321,7 @@ async function executeToolCall(toolCall: any): Promise<string> {
             recipientName: args.recipientName,
             amountUgx: quote.receiveAmountUgx,
             amountUsdc: quote.sendAmountUsdc,
-            senderName: args.senderName || args.recipientName,
+            senderName: args.senderName || ctx.userName || args.recipientName,
           });
         }
 
