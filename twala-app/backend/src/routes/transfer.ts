@@ -47,7 +47,7 @@ router.get('/quote', async (req, res) => {
 
 router.post('/offramp', async (req, res) => {
   try {
-    const { amountUsdc, recipientName, recipientPhone, recipientNetwork, purpose, goalId, senderName } = req.body;
+    const { amountUsdc, recipientName, recipientPhone, recipientNetwork, purpose, goalId, senderName, senderPhone, confirmSelfSend } = req.body;
 
     const errors: string[] = [];
     if (!amountUsdc || amountUsdc <= 0) errors.push('Valid amountUsdc required');
@@ -57,6 +57,15 @@ router.post('/offramp', async (req, res) => {
     if (amountUsdc > config.twala.maxTransferUsdc) errors.push(`Maximum transfer is ${config.twala.maxTransferUsdc} USDC`);
     if (errors.length > 0) {
       return res.status(400).json({ success: false, message: errors.join('; ') });
+    }
+
+    // Self-send guard
+    if (recipientPhone && senderPhone && recipientPhone.trim() === senderPhone.trim() && !confirmSelfSend) {
+      return res.status(400).json({
+        success: false,
+        message: 'You are sending money to your own phone number. Send the request again to confirm you want to send to yourself.',
+        selfSend: true,
+      });
     }
 
     const wallet = await db.getWallet();

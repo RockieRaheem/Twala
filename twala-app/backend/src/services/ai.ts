@@ -95,7 +95,7 @@ You can perform these actions via function calls — DO IT when asked:
 - If a goal is cancelled, tell the user to create a new one instead
 - Before sending money, verify the wallet has enough USDC balance (shown above)
 - Check minimum (10 USDC) and maximum (5,000 USDC) transfer limits
-- Do not let the user send money to themselves
+- If the recipient phone matches the user's phone, warn and ask for confirmation. If they confirm, set **confirmSelfSend: true**
 - Proactively suggest better approaches when the user proposes something risky
 
 IMPORTANT: When calling functions that require a goalId, you MUST use the exact ID value shown after "ID:" in the Goals list above. Never make up a goalId — use the actual one from the context.
@@ -160,6 +160,7 @@ const TOOLS: any[] = [
           recipientPhone: { type: 'string', description: 'Phone (e.g. +256...)' },
           recipientNetwork: { type: 'string', enum: ['MTN', 'AIRTEL'], description: 'Mobile network: MTN or AIRTEL' },
           purpose: { type: 'string', description: 'Purpose (e.g. "Family Support")' },
+          confirmSelfSend: { type: 'boolean', description: 'Set to true if the user confirmed they want to send to their own number' },
         },
         required: ['amountUsdc', 'recipientName', 'purpose'],
       },
@@ -270,6 +271,10 @@ async function executeToolCall(toolCall: any, ctx: AiContext): Promise<string> {
       case 'send_money': {
         const amountUsdc = typeof args.amountUsdc === 'string' ? parseFloat(args.amountUsdc) : args.amountUsdc;
         if (isNaN(amountUsdc)) return `❌ Invalid amount.`;
+        // Self-send guard
+        if (args.recipientPhone && ctx.userPhone && args.recipientPhone.trim() === ctx.userPhone.trim() && !args.confirmSelfSend) {
+          return `⚠️ **${ctx.userName}**, that number (**${ctx.userPhone}**) is your own. Sending to yourself will use network fees for no benefit. If you're sure, call send_money again with **confirmSelfSend: true**.`;
+        }
         const network = args.recipientNetwork?.toUpperCase() === 'AIRTEL' ? 'AIRTEL' : 'MTN';
         const wallet = await db.getWallet();
         if (!wallet) return '❌ No wallet found. Create a wallet first.';

@@ -209,6 +209,7 @@ export default function SmartTransfer({ user }: Props = {}) {
           purpose: selectedPurpose.label,
           goalId: selectedGoalId || undefined,
           senderName: user?.name,
+          senderPhone: user?.phone,
         });
         if (res.success && res.data) {
           const g = goals.find((x) => x.id === selectedGoalId);
@@ -230,6 +231,37 @@ export default function SmartTransfer({ user }: Props = {}) {
           setRecipientPhone('');
           setSelectedGoalId(null);
           setQuote(null);
+        } else if ((res as any).selfSend) {
+          Alert.alert(
+            'Send to Yourself?',
+            res.message || 'This is your own phone number. Proceed?',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Send Anyway', style: 'destructive', onPress: async () => {
+                const retryRes = await transferApi.offramp({
+                  amountUsdc: usdAmount, recipientName: recipientName.trim(),
+                  recipientPhone: recipientPhone.trim() || undefined, recipientNetwork,
+                  purpose: selectedPurpose.label, goalId: selectedGoalId || undefined,
+                  senderName: user?.name, senderPhone: user?.phone,
+                  confirmSelfSend: true,
+                });
+                if (retryRes.success && retryRes.data) {
+                  const g = goals.find((x) => x.id === selectedGoalId);
+                  setSuccessData({
+                    amountUsdc: quote!.sendAmountUsdc, amountUgx: quote!.receiveAmountUgx,
+                    recipientName: recipientName.trim(), recipientPhone: recipientPhone.trim() || undefined,
+                    recipientNetwork, referenceId: retryRes.data.kotaniReferenceId,
+                    newBalance: retryRes.data.balance ?? 0, feeUsdc: quote!.feeUsdc,
+                    rate: quote!.rate, goalTitle: g?.title,
+                  });
+                  setAmount('500'); setRecipientName(''); setRecipientPhone('');
+                  setSelectedGoalId(null); setQuote(null);
+                } else {
+                  Alert.alert('Error', retryRes.message || 'Transfer failed.');
+                }
+              }},
+            ]
+          );
         } else {
           Alert.alert('Error', res.message || 'Transfer failed.');
         }
