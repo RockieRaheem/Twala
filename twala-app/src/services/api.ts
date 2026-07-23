@@ -249,8 +249,8 @@ export const chatApi = {
   deleteSession: (id: string) =>
     request<{ success: boolean }>(`/chat/sessions/${id}`, { method: 'DELETE' }),
 
-  send: (sessionId: string, message: string) =>
-    request<{ messages: ChatMsg[]; navigate?: NavigateAction }>(`/chat/sessions/${sessionId}/send`, { method: 'POST', body: JSON.stringify({ message }) }, 25000),
+  send: (sessionId: string, message: string, userName?: string, userPhone?: string) =>
+    request<{ messages: ChatMsg[]; navigate?: NavigateAction }>(`/chat/sessions/${sessionId}/send`, { method: 'POST', body: JSON.stringify({ message, userName, userPhone }) }, 25000),
 
   // Legacy (keep for backward compat)
   list: () =>

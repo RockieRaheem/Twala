@@ -511,12 +511,12 @@ console.log(`  AI      : ${process.env.GEMINI_API_KEY ? 'Gemini ✓ (2.0 Flash)'
 // Public API — never throws
 // ---------------------------------------------------------------------------
 
-export async function chat(userMessage: string, sessionId?: string): Promise<{ messages: ChatMessage[]; navigate: { screen: string; goalId?: string } | null }> {
+export async function chat(userMessage: string, sessionId?: string, userName?: string, userPhone?: string): Promise<{ messages: ChatMessage[]; navigate: { screen: string; goalId?: string } | null }> {
   _pendingNavigate = null;
 
   try { await db.addChatMessage({ role: 'user', content: userMessage, sessionId }); } catch (e) { console.error('Failed to save user msg:', e); }
 
-  const ctx = await buildContext();
+  const ctx = await buildContext(userName, userPhone);
   let history: ChatMessage[] = [];
   try { history = await db.getChatMessages(sessionId); } catch (e) { console.error('Failed to load history:', e); }
 

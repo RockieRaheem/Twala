@@ -44,7 +44,7 @@ router.delete('/sessions/:id', async (req, res) => {
 // ---------------------------------------------------------------------------
 
 router.post('/sessions/:id/send', async (req, res) => {
-  const { message } = req.body;
+  const { message, userName, userPhone } = req.body;
   const sessionId = req.params.id;
 
   if (!message || !message.trim()) {
@@ -68,7 +68,7 @@ router.post('/sessions/:id/send', async (req, res) => {
   }
 
   try {
-    const { messages, navigate } = await ai.chat(message.trim(), sessionId);
+    const { messages, navigate } = await ai.chat(message.trim(), sessionId, userName, userPhone);
     res.json({ success: true, data: { messages, navigate } });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

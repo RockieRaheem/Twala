@@ -209,11 +209,13 @@ function formatRelativeTime(iso: string): string {
 interface Props {
   onNavigate?: (screen: string) => void;
   onNavigateGoal?: (id: string) => void;
+  userName?: string;
+  userPhone?: string;
 }
 
 export type { Props as AIAssistantProps };
 
-export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
+export default function AIAssistant({ onNavigate, onNavigateGoal, userName, userPhone }: Props) {
   const [sessions, setSessions] = useState<ChatSessionData[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -323,7 +325,7 @@ export default function AIAssistant({ onNavigate, onNavigateGoal }: Props) {
     const optimistic: ChatMsg = { role: 'user', content: userMsg, timestamp: new Date().toISOString() };
     setMessages((prev) => [...prev, optimistic]);
 
-    const [chatRes, sugRes] = await Promise.all([chatApi.send(sid, userMsg), chatApi.suggestions()]);
+    const [chatRes, sugRes] = await Promise.all([chatApi.send(sid, userMsg, userName, userPhone), chatApi.suggestions()]);
     if (chatRes.success && chatRes.data) {
       const { messages: msgs, navigate } = chatRes.data as any;
       if (Array.isArray(msgs) && msgs.length > 0) { setMessages(msgs); notifyChange(); }
